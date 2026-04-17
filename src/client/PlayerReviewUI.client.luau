@@ -422,6 +422,40 @@ local function resolveOtherPlayerFromScreenPoint(screenPos: Vector2): Player?
 	return plr
 end
 
+-- Server returns { eligible = bool, reason = optional } or legacy boolean.
+local function parseReviewEligibilityResponse(res: any): (boolean, string)
+	if res == true then
+		return true, ""
+	end
+	if typeof(res) ~= "table" then
+		return false, "unknown"
+	end
+	local t = res :: { eligible: any?, reason: any? }
+	if t.eligible == true then
+		return true, ""
+	end
+	if t.reason == "interaction" then
+		return false, "interaction"
+	end
+	if t.reason == "city" then
+		return false, "city"
+	end
+	if t.reason == "unavailable" then
+		return false, "unavailable"
+	end
+	return false, "unknown"
+end
+
+local function eligibilityFailMessage(kind: string): string
+	if kind == "interaction" then
+		return "You can only review players you've recently interacted with."
+	end
+	if kind == "unavailable" then
+		return "Target is not available."
+	end
+	return "Reviews are only for players in your city."
+end
+
 local function hidePendingHint()
 	pendingHint.Visible = false
 	pendingHintLbl.Text = ""
@@ -553,11 +587,12 @@ local function submitReviewForLockedTarget(): ()
 		return
 	end
 
-	local okElig, cityOk = pcall(function()
+	local okElig, rawElig = pcall(function()
 		return Remotes.GetReviewCityEligibility:InvokeServer(uid)
 	end)
-	if not okElig or cityOk ~= true then
-		showFeedback("Reviews are only for players in your city.", true)
+	local eligible, failKind = parseReviewEligibilityResponse(if okElig then rawElig else false)
+	if not eligible then
+		showFeedback(eligibilityFailMessage(failKind), true)
 		return
 	end
 
@@ -702,13 +737,13 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed: boolean)
 		return
 	end
 
-	local okElig, cityOk = pcall(function()
+	local okElig, rawElig = pcall(function()
 		return Remotes.GetReviewCityEligibility:InvokeServer(other.UserId)
 	end)
-	local eligible = okElig and cityOk == true
+	local eligible, failKind = parseReviewEligibilityResponse(if okElig then rawElig else false)
 	if not eligible then
 		if root.Visible then
-			showFeedback("Reviews are only for players in your city.", true)
+			showFeedback(eligibilityFailMessage(failKind), true)
 		end
 		return
 	end

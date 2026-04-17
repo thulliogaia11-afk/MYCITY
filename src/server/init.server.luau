@@ -172,7 +172,7 @@ GetPlayerReviewSummary.OnServerInvoke = function(player, targetUserId)
 end
 
 GetReviewCityEligibility.OnServerInvoke = function(player, targetUserId)
-	return ReviewService.CanReviewTargetForCity(player, targetUserId)
+	return ReviewService.GetReviewEligibility(player, targetUserId)
 end
 
 BuyHouse.OnServerInvoke = function(player, level)

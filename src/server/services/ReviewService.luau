@@ -11,7 +11,17 @@ local MAX_COMMENT_LENGTH = 160
 local REVIEW_COOLDOWN_SECONDS = 30
 local MAX_STORED_REVIEWS = 100
 
+-- Recent interaction: must dwell near each other (same city) before reviews unlock both ways.
+local MAX_INTERACTION_DISTANCE_STUDS = 18
+local MIN_INTERACTION_SECONDS = 8
+local REVIEW_ELIGIBILITY_WINDOW_SECONDS = 600
+
 local PlayerDataService = require(script.Parent:WaitForChild("PlayerDataService") :: ModuleScript)
+
+-- pairKey -> consecutive seconds in range (reset when out of range).
+local proximityPairDwellSec: { [string]: number } = {}
+-- reviewerUserId -> targetUserId -> expiry unix time for review permission.
+local reviewEligibleUntil: { [number]: { [number]: number } } = {}
 
 type ReviewEntry = {
 	reviewerUserId: number,
@@ -32,6 +42,80 @@ type ReviewSummary = {
 local reviewCooldownByUserId: { [number]: number } = {}
 
 local ReviewService = {}
+
+type ReviewEligibilityResult = {
+	eligible: boolean,
+	reason: ("city" | "interaction" | "unavailable")?,
+}
+
+local PROXIMITY_TICK_SEC = 0.5
+
+local function pairKeySorted(uidA: number, uidB: number): string
+	if uidA < uidB then
+		return tostring(uidA) .. "_" .. tostring(uidB)
+	end
+	return tostring(uidB) .. "_" .. tostring(uidA)
+end
+
+local function getHumanoidRoot(player: Player): BasePart?
+	local char = player.Character
+	if not char then
+		return nil
+	end
+	local r = char:FindFirstChild("HumanoidRootPart")
+	if r and r:IsA("BasePart") then
+		return r
+	end
+	if char.PrimaryPart and char.PrimaryPart:IsA("BasePart") then
+		return char.PrimaryPart
+	end
+	return nil
+end
+
+local function pruneExpiredInteractionGrants(now: number)
+	for reviewerUid, targets in pairs(reviewEligibleUntil) do
+		for targetUid, exp in pairs(targets) do
+			if now > exp then
+				targets[targetUid] = nil
+			end
+		end
+		if next(targets) == nil then
+			reviewEligibleUntil[reviewerUid] = nil
+		end
+	end
+end
+
+local function clearInteractionStateForUser(userId: number)
+	local sud = tostring(userId)
+	for k in pairs(proximityPairDwellSec) do
+		if string.match(k, "^" .. sud .. "_") ~= nil or string.match(k, "_" .. sud .. "$") ~= nil then
+			proximityPairDwellSec[k] = nil
+		end
+	end
+	reviewEligibleUntil[userId] = nil
+	for _, targets in pairs(reviewEligibleUntil) do
+		targets[userId] = nil
+	end
+end
+
+local function hasRecentInteractionGrant(reviewerUserId: number, targetUserId: number): boolean
+	local now = os.time()
+	local byTarget = reviewEligibleUntil[reviewerUserId]
+	if not byTarget then
+		return false
+	end
+	local exp = byTarget[targetUserId]
+	if typeof(exp) ~= "number" or now > exp then
+		if typeof(exp) == "number" and now > exp then
+			byTarget[targetUserId] = nil
+			if next(byTarget) == nil then
+				reviewEligibleUntil[reviewerUserId] = nil
+			end
+		end
+		return false
+	end
+	return true
+end
 
 local function log(message: string)
 	print(string.format("[%s] ReviewService: %s", GAME_LABEL, message))
@@ -189,12 +273,74 @@ local function reviewerSharesEligibleCity(reviewer: Player, target: Player): boo
 	return ca == cb
 end
 
-function ReviewService.CanReviewTargetForCity(reviewer: Player, targetUserId: number): boolean
+local function stepProximityInteractionLoop()
+	task.spawn(function()
+		while true do
+			task.wait(PROXIMITY_TICK_SEC)
+			local now = os.time()
+			pruneExpiredInteractionGrants(now)
+
+			local plist = Players:GetPlayers()
+			for i = 1, #plist do
+				for j = i + 1, #plist do
+					local pa, pb = plist[i], plist[j]
+					local key = pairKeySorted(pa.UserId, pb.UserId)
+
+					if not reviewerSharesEligibleCity(pa, pb) then
+						proximityPairDwellSec[key] = 0
+						continue
+					end
+
+					local ra = getHumanoidRoot(pa)
+					local rb = getHumanoidRoot(pb)
+					if
+						ra
+						and rb
+						and (ra.Position - rb.Position).Magnitude <= MAX_INTERACTION_DISTANCE_STUDS
+					then
+						local prev = proximityPairDwellSec[key] or 0
+						local dwell = prev + PROXIMITY_TICK_SEC
+						proximityPairDwellSec[key] = dwell
+						if dwell >= MIN_INTERACTION_SECONDS then
+							local untilT = now + REVIEW_ELIGIBILITY_WINDOW_SECONDS
+							if not reviewEligibleUntil[pa.UserId] then
+								reviewEligibleUntil[pa.UserId] = {}
+							end
+							if not reviewEligibleUntil[pb.UserId] then
+								reviewEligibleUntil[pb.UserId] = {}
+							end
+							reviewEligibleUntil[pa.UserId][pb.UserId] = untilT
+							reviewEligibleUntil[pb.UserId][pa.UserId] = untilT
+							proximityPairDwellSec[key] = 0
+							log(string.format("interaction grant %s <-> %s (until t=%d)", pa.Name, pb.Name, untilT))
+						end
+					else
+						proximityPairDwellSec[key] = 0
+					end
+				end
+			end
+		end
+	end)
+end
+
+stepProximityInteractionLoop()
+
+function ReviewService.GetReviewEligibility(reviewer: Player, targetUserId: number): ReviewEligibilityResult
 	local target = getTargetPlayer(targetUserId)
 	if not target then
-		return false
+		return { eligible = false, reason = "unavailable" }
 	end
-	return reviewerSharesEligibleCity(reviewer, target)
+	if not reviewerSharesEligibleCity(reviewer, target) then
+		return { eligible = false, reason = "city" }
+	end
+	if not hasRecentInteractionGrant(reviewer.UserId, targetUserId) then
+		return { eligible = false, reason = "interaction" }
+	end
+	return { eligible = true }
+end
+
+function ReviewService.CanReviewTargetForCity(reviewer: Player, targetUserId: number): boolean
+	return ReviewService.GetReviewEligibility(reviewer, targetUserId).eligible
 end
 
 function ReviewService.SubmitReview(reviewerPlayer: Player, targetUserId: number, rating: number, comment: any)
@@ -235,6 +381,11 @@ function ReviewService.SubmitReview(reviewerPlayer: Player, targetUserId: number
 	if not reviewerSharesEligibleCity(reviewerPlayer, targetPlayer) then
 		log(string.format("review rejected: %s not same city as target %s", reviewerPlayer.Name, targetPlayer.Name))
 		return { success = false, message = "You can only review players in your city." }
+	end
+
+	if not hasRecentInteractionGrant(reviewerPlayer.UserId, targetUserId) then
+		log(string.format("review rejected: %s no recent interaction with %s", reviewerPlayer.Name, targetPlayer.Name))
+		return { success = false, message = "You can only review players you've recently interacted with." }
 	end
 
 	local cleanComment = trimComment(comment)
@@ -333,6 +484,7 @@ end
 
 Players.PlayerRemoving:Connect(function(player: Player)
 	reviewCooldownByUserId[player.UserId] = nil
+	clearInteractionStateForUser(player.UserId)
 end)
 
 return ReviewService
