@@ -49,6 +49,7 @@ local eligibilityRefreshSeq = 0
 -- Pending confirmation (panel not open yet): first click selects, second click opens.
 local pendingReviewTarget: Player? = nil
 local pendingReviewSeq = 0
+local pendingEligibilityPollNext = 0
 
 -- ——— UI (single build) ———
 local existing = PlayerGui:FindFirstChild("PlayerReviewUI")
@@ -603,6 +604,44 @@ local function clearEligibleHover()
 end
 
 RunService.RenderStepped:Connect(function()
+	-- Pending review confirmation: cancel early if gates fail (same checks as confirm click).
+	if pendingReviewTarget and not root.Visible then
+		local p = pendingReviewTarget
+		if not p.Parent then
+			invalidatePending("target_left")
+		elseif not p.Character then
+			invalidatePending("invalid_target")
+		elseif not withinReviewDistanceTo(p) then
+			invalidatePending("distance")
+		elseif GuiService.MenuIsOpen then
+			invalidatePending("invalid_target")
+		elseif UserInputService:GetFocusedTextBox() ~= nil then
+			invalidatePending("invalid_target")
+		else
+			local nowPc = os.clock()
+			if nowPc >= pendingEligibilityPollNext then
+				pendingEligibilityPollNext = nowPc + HOVER_ELIGIBILITY_POLL
+				local seqCap = pendingReviewSeq
+				local pt = p
+				task.spawn(function()
+					local ok, raw = pcall(function()
+						return Remotes.GetReviewCityEligibility:InvokeServer(pt.UserId)
+					end)
+					if seqCap ~= pendingReviewSeq then
+						return
+					end
+					if pendingReviewTarget ~= pt then
+						return
+					end
+					local eligible = select(1, parseReviewEligibilityResponse(ok and raw or false))
+					if not eligible then
+						invalidatePending("eligibility")
+					end
+				end)
+			end
+		end
+	end
+
 	if root.Visible then
 		if hoverPlayer ~= nil then
 			clearEligibleHover()
@@ -938,8 +977,26 @@ local function invalidatePending(reason: string?)
 	pendingReviewSeq += 1
 	pendingReviewTarget = nil
 	hidePendingHint()
+
 	if reason == "timeout" and had then
 		log("pending expired target=%s", had.Name)
+		return
+	end
+
+	if reason == nil then
+		return
+	end
+
+	local messages: { [string]: string } = {
+		distance = "pending cancelled (distance)",
+		eligibility = "pending cancelled (eligibility)",
+		target_left = "pending cancelled (target_left)",
+		local_respawn = "pending cancelled (local_respawn)",
+		invalid_target = "pending cancelled (invalid_target)",
+	}
+	local msg = messages[reason]
+	if msg and had then
+		log(msg)
 	end
 end
 
@@ -948,6 +1005,7 @@ local function armPendingReviewTarget(target: Player)
 	pendingReviewSeq += 1
 	local armSeq = pendingReviewSeq
 	pendingReviewTarget = target
+	pendingEligibilityPollNext = 0
 	pendingHintLbl.Text = string.format("Review %s — click again (%.1fs)", display, PENDING_CONFIRM_SECONDS)
 	pendingHint.Visible = true
 	log("pending target=%s (%d)", target.Name, target.UserId)
@@ -1262,7 +1320,9 @@ end)
 
 LocalPlayer.CharacterAdded:Connect(function()
 	clearEligibleHover()
-	invalidatePending(nil)
+	if pendingReviewTarget then
+		invalidatePending("local_respawn")
+	end
 	if root.Visible then
 		closeReviewPanel("local_respawn")
 	end
@@ -1274,7 +1334,7 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	end
 
 	if pendingReviewTarget == player then
-		invalidatePending(nil)
+		invalidatePending("target_left")
 	end
 
 	if not root.Visible then
