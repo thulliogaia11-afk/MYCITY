@@ -74,7 +74,7 @@ local root = Instance.new("Frame")
 root.Name = "Panel"
 root.AnchorPoint = Vector2.new(1, 1)
 root.Position = UDim2.new(1, -20, 1, -88)
-root.Size = UDim2.fromOffset(320, 538)
+root.Size = UDim2.fromOffset(320, 592)
 root.BackgroundColor3 = NAVY
 root.BorderSizePixel = 0
 root.Visible = false
@@ -156,12 +156,69 @@ targetUserLbl.TextXAlignment = Enum.TextXAlignment.Left
 targetUserLbl.Text = ""
 targetUserLbl.Parent = root
 
+local identityCard = Instance.new("Frame")
+identityCard.Name = "SocialIdentity"
+identityCard.BackgroundColor3 = Color3.fromRGB(18, 24, 42)
+identityCard.BackgroundTransparency = 0.22
+identityCard.BorderSizePixel = 0
+identityCard.Size = UDim2.new(1, 0, 0, 0)
+identityCard.AutomaticSize = Enum.AutomaticSize.Y
+identityCard.LayoutOrder = 4
+identityCard.Parent = root
+local identityCorner = Instance.new("UICorner")
+identityCorner.CornerRadius = UDim.new(0, 8)
+identityCorner.Parent = identityCard
+local identityPad = Instance.new("UIPadding")
+identityPad.PaddingTop = UDim.new(0, 8)
+identityPad.PaddingBottom = UDim.new(0, 8)
+identityPad.PaddingLeft = UDim.new(0, 10)
+identityPad.PaddingRight = UDim.new(0, 10)
+identityPad.Parent = identityCard
+local identityLayout = Instance.new("UIListLayout")
+identityLayout.SortOrder = Enum.SortOrder.LayoutOrder
+identityLayout.Padding = UDim.new(0, 4)
+identityLayout.Parent = identityCard
+
+local IDENTITY_LABELS = { "Social tier", "Social score", "Avg rating", "Reviews" }
+local identityValueLbls: { TextLabel } = {}
+
+for i, title in ipairs(IDENTITY_LABELS) do
+	local row = Instance.new("Frame")
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, 14)
+	row.LayoutOrder = i
+	row.Parent = identityCard
+
+	local titleLbl = Instance.new("TextLabel")
+	titleLbl.BackgroundTransparency = 1
+	titleLbl.Size = UDim2.new(0, 84, 1, 0)
+	titleLbl.Font = Enum.Font.Gotham
+	titleLbl.TextSize = 11
+	titleLbl.TextColor3 = TEXT_MUTED
+	titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+	titleLbl.Text = title
+	titleLbl.Parent = row
+
+	local valLbl = Instance.new("TextLabel")
+	valLbl.BackgroundTransparency = 1
+	valLbl.Position = UDim2.new(0, 88, 0, 0)
+	valLbl.Size = UDim2.new(1, -88, 1, 0)
+	valLbl.Font = Enum.Font.GothamMedium
+	valLbl.TextSize = 11
+	valLbl.TextColor3 = TEXT_WHITE
+	valLbl.TextXAlignment = Enum.TextXAlignment.Left
+	valLbl.TextTruncate = Enum.TextTruncate.AtEnd
+	valLbl.Text = "…"
+	valLbl.Parent = row
+	table.insert(identityValueLbls, valLbl)
+end
+
 local eligibilitySection = Instance.new("Frame")
 eligibilitySection.Name = "EligibilitySection"
 eligibilitySection.BackgroundTransparency = 1
 eligibilitySection.Size = UDim2.new(1, 0, 0, 0)
 eligibilitySection.AutomaticSize = Enum.AutomaticSize.Y
-eligibilitySection.LayoutOrder = 4
+eligibilitySection.LayoutOrder = 5
 eligibilitySection.Parent = root
 
 local eligibilitySectionLayout = Instance.new("UIListLayout")
@@ -233,7 +290,7 @@ end
 local summaryLbl = Instance.new("TextLabel")
 summaryLbl.BackgroundTransparency = 1
 summaryLbl.Size = UDim2.new(1, 0, 0, 34)
-summaryLbl.LayoutOrder = 5
+summaryLbl.LayoutOrder = 6
 summaryLbl.Font = Enum.Font.Gotham
 summaryLbl.TextSize = 13
 summaryLbl.TextColor3 = TEXT_MUTED
@@ -249,7 +306,7 @@ recentReviewsScroll.BackgroundTransparency = 0.25
 recentReviewsScroll.BackgroundColor3 = Color3.fromRGB(18, 22, 38)
 recentReviewsScroll.BorderSizePixel = 0
 recentReviewsScroll.Size = UDim2.new(1, 0, 0, 96)
-recentReviewsScroll.LayoutOrder = 6
+recentReviewsScroll.LayoutOrder = 7
 recentReviewsScroll.ScrollBarThickness = 4
 recentReviewsScroll.ScrollBarImageColor3 = ACCENT
 recentReviewsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
@@ -282,7 +339,7 @@ recentReviewsLayout.Parent = recentReviewsList
 local ratingSectionTitle = Instance.new("TextLabel")
 ratingSectionTitle.BackgroundTransparency = 1
 ratingSectionTitle.Size = UDim2.new(1, 0, 0, 16)
-ratingSectionTitle.LayoutOrder = 7
+ratingSectionTitle.LayoutOrder = 8
 ratingSectionTitle.Font = Enum.Font.GothamBold
 ratingSectionTitle.TextSize = 12
 ratingSectionTitle.TextColor3 = TEXT_WHITE
@@ -293,7 +350,7 @@ ratingSectionTitle.Parent = root
 local ratingRow = Instance.new("Frame")
 ratingRow.BackgroundTransparency = 1
 ratingRow.Size = UDim2.new(1, 0, 0, 36)
-ratingRow.LayoutOrder = 8
+ratingRow.LayoutOrder = 9
 ratingRow.Parent = root
 
 local ratingLayout = Instance.new("UIListLayout")
@@ -332,7 +389,7 @@ end
 local ratingHintLbl = Instance.new("TextLabel")
 ratingHintLbl.BackgroundTransparency = 1
 ratingHintLbl.Size = UDim2.new(1, 0, 0, 14)
-ratingHintLbl.LayoutOrder = 9
+ratingHintLbl.LayoutOrder = 10
 ratingHintLbl.Font = Enum.Font.Gotham
 ratingHintLbl.TextSize = 11
 ratingHintLbl.TextColor3 = TEXT_MUTED
@@ -343,7 +400,7 @@ ratingHintLbl.Parent = root
 local commentTitle = Instance.new("TextLabel")
 commentTitle.BackgroundTransparency = 1
 commentTitle.Size = UDim2.new(1, 0, 0, 16)
-commentTitle.LayoutOrder = 10
+commentTitle.LayoutOrder = 11
 commentTitle.Font = Enum.Font.GothamBold
 commentTitle.TextSize = 12
 commentTitle.TextColor3 = TEXT_WHITE
@@ -353,7 +410,7 @@ commentTitle.Parent = root
 
 local commentBox = Instance.new("TextBox")
 commentBox.Size = UDim2.new(1, 0, 0, 64)
-commentBox.LayoutOrder = 11
+commentBox.LayoutOrder = 12
 commentBox.BackgroundColor3 = Color3.fromRGB(22, 28, 45)
 commentBox.TextColor3 = TEXT_WHITE
 commentBox.PlaceholderColor3 = TEXT_MUTED
@@ -380,7 +437,7 @@ cbPad.Parent = commentBox
 local statusLbl = Instance.new("TextLabel")
 statusLbl.BackgroundTransparency = 1
 statusLbl.Size = UDim2.new(1, 0, 0, 30)
-statusLbl.LayoutOrder = 12
+statusLbl.LayoutOrder = 13
 statusLbl.Font = Enum.Font.Gotham
 statusLbl.TextSize = 12
 statusLbl.TextColor3 = TEXT_MUTED
@@ -393,7 +450,7 @@ statusLbl.Parent = root
 
 local submitBtn = Instance.new("TextButton")
 submitBtn.Size = UDim2.new(1, 0, 0, 36)
-submitBtn.LayoutOrder = 13
+submitBtn.LayoutOrder = 14
 submitBtn.BackgroundColor3 = SUCCESS
 submitBtn.TextColor3 = TEXT_WHITE
 submitBtn.Font = Enum.Font.GothamBold
@@ -1173,6 +1230,29 @@ local function armPendingReviewTarget(target: Player)
 	end)
 end
 
+local function setSocialIdentityLoading()
+	for _, lbl in ipairs(identityValueLbls) do
+		lbl.Text = "…"
+	end
+end
+
+local function setSocialIdentityFallback()
+	identityValueLbls[1].Text = "Unknown"
+	identityValueLbls[2].Text = "—"
+	identityValueLbls[3].Text = "—"
+	identityValueLbls[4].Text = "—"
+end
+
+local function applySocialIdentityFromSummary(summary: any, avg: number, total: number)
+	local rawTier = typeof(summary.socialTier) == "string" and summary.socialTier or nil
+	local tierStr = (rawTier and rawTier ~= "") and rawTier or "Unknown"
+	local scoreNum = tonumber(summary.socialScore)
+	identityValueLbls[1].Text = tierStr
+	identityValueLbls[2].Text = if scoreNum ~= nil then tostring(math.floor(scoreNum + 0.5)) else "—"
+	identityValueLbls[3].Text = string.format("%.1f / 5", avg)
+	identityValueLbls[4].Text = tostring(math.max(0, math.floor(total + 0.5)))
+end
+
 local function renderSummary(summary: any, expectedToken: number)
 	if expectedToken ~= summaryFetchToken or not root.Visible then
 		return
@@ -1181,6 +1261,7 @@ local function renderSummary(summary: any, expectedToken: number)
 		summaryLbl.TextColor3 = DANGER
 		summaryLbl.Text = "Could not load summary."
 		clearRecentReviewRows()
+		setSocialIdentityFallback()
 		return
 	end
 
@@ -1188,11 +1269,19 @@ local function renderSummary(summary: any, expectedToken: number)
 		summaryLbl.TextColor3 = DANGER
 		summaryLbl.Text = tostring(summary.message or "Summary unavailable.")
 		clearRecentReviewRows()
+		setSocialIdentityFallback()
 		return
 	end
 
 	local avg = tonumber(summary.averageRating) or 0
 	local total = math.max(0, math.floor(tonumber(summary.totalReviews) or 0))
+
+	if expectedToken ~= summaryFetchToken or not root.Visible then
+		return
+	end
+
+	applySocialIdentityFromSummary(summary, avg, total)
+
 	summaryLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.Text = string.format("Average %.1f / 5   ·   %d reviews", avg, total)
 
@@ -1236,6 +1325,7 @@ local function fetchSummaryForLockedTarget(): ()
 	clearRecentReviewRows()
 	summaryLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.Text = "Loading summary..."
+	setSocialIdentityLoading()
 
 	task.spawn(function()
 		local ok, result = pcall(function()
@@ -1248,6 +1338,7 @@ local function fetchSummaryForLockedTarget(): ()
 			summaryLbl.TextColor3 = DANGER
 			summaryLbl.Text = "Summary request failed."
 			clearRecentReviewRows()
+			setSocialIdentityFallback()
 			log("summary fetch failed userId=%s (%s)", tostring(uid), tostring(result))
 			return
 		end
@@ -1389,6 +1480,7 @@ local function closeReviewPanel(reason: string?)
 	eligibilityLbl.Text = ""
 	eligibilityLbl.TextColor3 = TEXT_MUTED
 	applyEligibilityChecklist("unknown", "unknown", "unknown")
+	setSocialIdentityFallback()
 	summaryLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.Text = ""
 	clearRecentReviewRows()
@@ -1422,6 +1514,7 @@ local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 	eligibilityLbl.Text = ""
 	eligibilityLbl.TextColor3 = TEXT_MUTED
 	applyEligibilityChecklist("unknown", "unknown", "unknown")
+	setSocialIdentityLoading()
 
 	root.Visible = true
 
@@ -1537,6 +1630,7 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	eligibilityLbl.TextColor3 = DANGER
 	eligibilityLbl.Text = "This player is unavailable."
 	applyEligibilityChecklist("fail", "fail", "fail")
+	setSocialIdentityFallback()
 	local leftId = player.UserId
 	task.delay(1.2, function()
 		if selectedTargetUserId == leftId then

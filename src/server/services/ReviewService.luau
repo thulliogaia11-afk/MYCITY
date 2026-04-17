@@ -17,6 +17,7 @@ local MIN_INTERACTION_SECONDS = 8
 local REVIEW_ELIGIBILITY_WINDOW_SECONDS = 600
 
 local PlayerDataService = require(script.Parent:WaitForChild("PlayerDataService") :: ModuleScript)
+local SocialRatingService = require(script.Parent:WaitForChild("SocialRatingService") :: ModuleScript)
 
 -- pairKey -> consecutive seconds in range (reset when out of range).
 local proximityPairDwellSec: { [string]: number } = {}
@@ -37,6 +38,8 @@ type ReviewSummary = {
 	totalReviews: number,
 	reviews: { ReviewEntry },
 	message: string?,
+	socialTier: string?,
+	socialScore: number?,
 }
 
 local reviewCooldownByUserId: { [number]: number } = {}
@@ -473,12 +476,23 @@ function ReviewService.GetPlayerReviewSummary(_requestingPlayer: Player, targetU
 	local targetData = PlayerDataService.GetData(targetPlayer)
 	local reviews = collectNormalizedReviews(targetData.Reviews)
 	local averageRating, totalReviews = recalculateAggregates(reviews)
-	log(string.format("review summary fetched target=%s average=%.1f total=%d", targetPlayer.Name, averageRating, totalReviews))
+	local socialScore = typeof(targetData.SocialScore) == "number" and targetData.SocialScore or 0
+	local socialTier = SocialRatingService.GetTierForScore(socialScore)
+	log(string.format(
+		"review summary fetched target=%s average=%.1f total=%d social=%d tier=%s",
+		targetPlayer.Name,
+		averageRating,
+		totalReviews,
+		socialScore,
+		socialTier
+	))
 	return {
 		success = true,
 		averageRating = averageRating,
 		totalReviews = totalReviews,
 		reviews = reviews,
+		socialTier = socialTier,
+		socialScore = socialScore,
 	}
 end
 
