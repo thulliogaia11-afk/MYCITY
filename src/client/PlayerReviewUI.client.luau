@@ -8,6 +8,7 @@ local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local GuiService = game:GetService("GuiService")
 local Workspace = game:GetService("Workspace")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
@@ -370,6 +371,37 @@ pendingHintLbl.TextXAlignment = Enum.TextXAlignment.Center
 pendingHintLbl.Text = ""
 pendingHintLbl.Parent = pendingHint
 
+-- Follows mouse when an eligible review target is hovered (desktop only).
+local hoverPromptWrap = Instance.new("Frame")
+hoverPromptWrap.Name = "HoverReviewPrompt"
+hoverPromptWrap.AnchorPoint = Vector2.new(0.5, 0)
+hoverPromptWrap.Size = UDim2.fromOffset(268, 28)
+hoverPromptWrap.BackgroundColor3 = NAVY
+hoverPromptWrap.BackgroundTransparency = 0.18
+hoverPromptWrap.BorderSizePixel = 0
+hoverPromptWrap.Visible = false
+hoverPromptWrap.ZIndex = 15
+hoverPromptWrap.Parent = screenGui
+local hoverPromptCorner = Instance.new("UICorner")
+hoverPromptCorner.CornerRadius = UDim.new(0, 6)
+hoverPromptCorner.Parent = hoverPromptWrap
+local hoverPromptStroke = Instance.new("UIStroke")
+hoverPromptStroke.Color = ACCENT
+hoverPromptStroke.Thickness = 1
+hoverPromptStroke.Transparency = 0.6
+hoverPromptStroke.Parent = hoverPromptWrap
+local hoverPromptLbl = Instance.new("TextLabel")
+hoverPromptLbl.BackgroundTransparency = 1
+hoverPromptLbl.Size = UDim2.new(1, -14, 1, 0)
+hoverPromptLbl.Position = UDim2.new(0, 7, 0, 0)
+hoverPromptLbl.Font = Enum.Font.GothamMedium
+hoverPromptLbl.TextSize = 13
+hoverPromptLbl.TextColor3 = TEXT_WHITE
+hoverPromptLbl.TextXAlignment = Enum.TextXAlignment.Center
+hoverPromptLbl.TextTruncate = Enum.TextTruncate.AtEnd
+hoverPromptLbl.Text = ""
+hoverPromptLbl.Parent = hoverPromptWrap
+
 local function targetLogName(player: Player?, userId: number?): string
 	if player and player.Parent then
 		return player.Name
@@ -513,6 +545,146 @@ local function parseReviewEligibilityResponse(res: any): (boolean, string)
 	end
 	return false, "unknown"
 end
+
+-- ——— Eligible-target hover (desktop pointer; same gates as opening a review) ———
+local HOVER_ELIGIBILITY_POLL = 2
+local hoverTrackSeq = 0
+local hoverPlayer: Player? = nil
+local hoverDisplayActive = false
+local hoverNextPollTime = 0
+local hoverHighlight: Highlight? = nil
+
+local function displayNameForHover(p: Player): string
+	return p.DisplayName ~= "" and p.DisplayName or p.Name
+end
+
+local function layoutHoverPromptScreenPos(screenPos: Vector2)
+	local cam = Workspace.CurrentCamera
+	if not cam then
+		return
+	end
+	local vp = cam.ViewportSize
+	local guiTop = GuiService:GetGuiInset().Y
+	local x = math.clamp(screenPos.X, 64, math.max(64, vp.X - 64))
+	local y = math.clamp(screenPos.Y + 32, guiTop + 4, math.max(guiTop + 4, vp.Y - 6))
+	hoverPromptWrap.Position = UDim2.fromOffset(x, y)
+end
+
+local function detachHoverHighlight()
+	if hoverHighlight then
+		hoverHighlight.Enabled = false
+		hoverHighlight.Parent = nil
+	end
+end
+
+local function ensureHoverHighlightOn(char: Model)
+	if not hoverHighlight then
+		hoverHighlight = Instance.new("Highlight")
+		hoverHighlight.Name = "ReviewHoverFx"
+		hoverHighlight.FillColor = ACCENT
+		hoverHighlight.OutlineColor = ACCENT
+		hoverHighlight.FillTransparency = 0.92
+		hoverHighlight.OutlineTransparency = 0.78
+		hoverHighlight.DepthMode = Enum.HighlightDepthMode.Occluded
+	end
+	if hoverHighlight.Parent ~= char then
+		hoverHighlight.Parent = char
+	end
+	hoverHighlight.Enabled = true
+end
+
+local function clearEligibleHover()
+	hoverTrackSeq += 1
+	hoverPlayer = nil
+	hoverDisplayActive = false
+	hoverNextPollTime = 0
+	detachHoverHighlight()
+	hoverPromptWrap.Visible = false
+end
+
+RunService.RenderStepped:Connect(function()
+	if root.Visible then
+		if hoverPlayer ~= nil then
+			clearEligibleHover()
+		end
+		return
+	end
+
+	if not UserInputService.MouseEnabled then
+		if hoverPlayer ~= nil then
+			clearEligibleHover()
+		end
+		return
+	end
+
+	local mousePos = UserInputService:GetMouseLocation()
+	local other = resolveOtherPlayerFromScreenPoint(mousePos)
+	if not other or not withinReviewDistanceTo(other) then
+		clearEligibleHover()
+		return
+	end
+
+	local nowClock = os.clock()
+
+	if hoverPlayer ~= other then
+		hoverTrackSeq += 1
+		hoverPlayer = other
+		hoverDisplayActive = false
+		hoverNextPollTime = 0
+		detachHoverHighlight()
+		hoverPromptWrap.Visible = false
+	end
+
+	local pollDue = nowClock >= hoverNextPollTime
+	if pollDue then
+		hoverNextPollTime = nowClock + HOVER_ELIGIBILITY_POLL
+	end
+
+	local seqAtStart = hoverTrackSeq
+	local targetForPoll = other
+
+	if pollDue then
+		task.spawn(function()
+			local ok, raw = pcall(function()
+				return Remotes.GetReviewCityEligibility:InvokeServer(targetForPoll.UserId)
+			end)
+			if seqAtStart ~= hoverTrackSeq then
+				return
+			end
+			if hoverPlayer ~= targetForPoll then
+				return
+			end
+			local eligible = select(1, parseReviewEligibilityResponse(ok and raw or false))
+			if not eligible then
+				hoverDisplayActive = false
+				detachHoverHighlight()
+				hoverPromptWrap.Visible = false
+				return
+			end
+			if hoverPlayer ~= targetForPoll then
+				return
+			end
+			hoverDisplayActive = true
+			local char = targetForPoll.Character
+			if char then
+				ensureHoverHighlightOn(char)
+			end
+			hoverPromptLbl.Text = string.format("Click to review %s", displayNameForHover(targetForPoll))
+			hoverPromptWrap.Visible = true
+			layoutHoverPromptScreenPos(UserInputService:GetMouseLocation())
+		end)
+	end
+
+	if hoverDisplayActive and hoverPlayer == other then
+		layoutHoverPromptScreenPos(mousePos)
+		local char = other.Character
+		if char then
+			ensureHoverHighlightOn(char)
+		else
+			detachHoverHighlight()
+		end
+	end
+end)
 
 local function eligibilityFailMessage(kind: string): string
 	if kind == "interaction" then
@@ -1089,6 +1261,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed: boolean)
 end)
 
 LocalPlayer.CharacterAdded:Connect(function()
+	clearEligibleHover()
 	invalidatePending(nil)
 	if root.Visible then
 		closeReviewPanel("local_respawn")
@@ -1096,6 +1269,10 @@ LocalPlayer.CharacterAdded:Connect(function()
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
+	if hoverPlayer == player then
+		clearEligibleHover()
+	end
+
 	if pendingReviewTarget == player then
 		invalidatePending(nil)
 	end
