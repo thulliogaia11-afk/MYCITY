@@ -1,6 +1,7 @@
 --[[
-	PlayerReviewUI — opens only when clicking/tapping another player's character.
-	Target is locked via selectedTargetUserId for all remote calls until close or switch.
+	PlayerReviewUI — click another eligible player once to arm a pending review, then click
+	the same player again within a short window (or confirm) to open the full panel.
+	Target is locked via selectedTargetUserId for all remote calls once opened.
 ]]
 
 local Players = game:GetService("Players")
@@ -17,6 +18,9 @@ local LOG_PREFIX = "[CLIENT][PlayerReview]"
 
 -- Max distance (studs) from local character to target to open or submit a review.
 local MAX_REVIEW_DISTANCE_STUDS = 18
+
+-- Seconds to confirm a pending review target with a second click before it expires.
+local PENDING_CONFIRM_SECONDS = 2.75
 
 local function log(fmt: string, ...: any)
 	print(string.format(LOG_PREFIX .. " " .. fmt, ...))
@@ -37,6 +41,10 @@ local selectedTargetUserId: number? = nil
 local selectedRating: number? = nil
 
 local summaryFetchToken = 0
+
+-- Pending confirmation (panel not open yet): first click selects, second click opens.
+local pendingReviewTarget: Player? = nil
+local pendingReviewSeq = 0
 
 -- ——— UI (single build) ———
 local existing = PlayerGui:FindFirstChild("PlayerReviewUI")
@@ -271,6 +279,36 @@ local sbc = Instance.new("UICorner")
 sbc.CornerRadius = CORNER
 sbc.Parent = submitBtn
 
+-- Compact hint when a player is selected but panel not opened yet (local player only).
+local pendingHint = Instance.new("Frame")
+pendingHint.Name = "PendingConfirmHint"
+pendingHint.AnchorPoint = Vector2.new(0.5, 1)
+pendingHint.Position = UDim2.new(0.5, 0, 1, -100)
+pendingHint.Size = UDim2.fromOffset(360, 34)
+pendingHint.BackgroundColor3 = NAVY
+pendingHint.BorderSizePixel = 0
+pendingHint.Visible = false
+pendingHint.ZIndex = 5
+pendingHint.Parent = screenGui
+local phc = Instance.new("UICorner")
+phc.CornerRadius = UDim.new(0, 6)
+phc.Parent = pendingHint
+local phs = Instance.new("UIStroke")
+phs.Color = ACCENT
+phs.Thickness = 1
+phs.Transparency = 0.35
+phs.Parent = pendingHint
+local pendingHintLbl = Instance.new("TextLabel")
+pendingHintLbl.BackgroundTransparency = 1
+pendingHintLbl.Size = UDim2.new(1, -16, 1, 0)
+pendingHintLbl.Position = UDim2.new(0, 8, 0, 0)
+pendingHintLbl.Font = Enum.Font.GothamMedium
+pendingHintLbl.TextSize = 13
+pendingHintLbl.TextColor3 = TEXT_WHITE
+pendingHintLbl.TextXAlignment = Enum.TextXAlignment.Center
+pendingHintLbl.Text = ""
+pendingHintLbl.Parent = pendingHint
+
 local function targetLogName(player: Player?, userId: number?): string
 	if player and player.Parent then
 		return player.Name
@@ -382,6 +420,36 @@ local function resolveOtherPlayerFromScreenPoint(screenPos: Vector2): Player?
 	end
 
 	return plr
+end
+
+local function hidePendingHint()
+	pendingHint.Visible = false
+	pendingHintLbl.Text = ""
+end
+
+local function invalidatePending(reason: string?)
+	local had = pendingReviewTarget
+	pendingReviewSeq += 1
+	pendingReviewTarget = nil
+	hidePendingHint()
+	if reason == "timeout" and had then
+		log("pending expired target=%s", had.Name)
+	end
+end
+
+local function armPendingReviewTarget(target: Player)
+	local display = target.DisplayName ~= "" and target.DisplayName or target.Name
+	pendingReviewSeq += 1
+	local armSeq = pendingReviewSeq
+	pendingReviewTarget = target
+	pendingHintLbl.Text = string.format("Review %s — click again (%.1fs)", display, PENDING_CONFIRM_SECONDS)
+	pendingHint.Visible = true
+	log("pending target=%s (%d)", target.Name, target.UserId)
+	task.delay(PENDING_CONFIRM_SECONDS, function()
+		if armSeq == pendingReviewSeq and pendingReviewTarget == target then
+			invalidatePending("timeout")
+		end
+	end)
 end
 
 local function renderSummary(summary: any)
@@ -535,6 +603,7 @@ local function closeReviewPanel(reason: string?)
 	local nm = targetLogName(plr, uid)
 
 	summaryFetchToken += 1
+	invalidatePending(nil)
 
 	selectedTargetPlayer = nil
 	selectedTargetUserId = nil
@@ -555,10 +624,12 @@ local function closeReviewPanel(reason: string?)
 	end
 end
 
-local function openReviewPanel(target: Player)
+local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 	if not target or target == LocalPlayer then
 		return
 	end
+
+	invalidatePending(nil)
 
 	summaryFetchToken += 1
 
@@ -576,7 +647,11 @@ local function openReviewPanel(target: Player)
 
 	root.Visible = true
 
-	log("panel opened for %s (%d)", target.Name, target.UserId)
+	if fromPendingConfirm then
+		log("panel opened for confirmed target %s (%d)", target.Name, target.UserId)
+	else
+		log("panel opened for %s (%d)", target.Name, target.UserId)
+	end
 
 	fetchSummaryForLockedTarget()
 end
@@ -595,10 +670,15 @@ for i, b in ratingButtons do
 end
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed: boolean)
-	-- Close on Escape whenever the panel is open (even if a TextBox would eat the key).
-	if input.KeyCode == Enum.KeyCode.Escape and root.Visible then
-		closeReviewPanel("escape")
-		return
+	if input.KeyCode == Enum.KeyCode.Escape then
+		if root.Visible then
+			closeReviewPanel("escape")
+			return
+		end
+		if pendingReviewTarget then
+			invalidatePending(nil)
+			return
+		end
 	end
 
 	if gameProcessed then
@@ -633,16 +713,31 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed: boolean)
 		return
 	end
 
-	openReviewPanel(other)
+	if root.Visible then
+		openReviewPanel(other, false)
+		return
+	end
+
+	if pendingReviewTarget == other then
+		openReviewPanel(other, true)
+		return
+	end
+
+	armPendingReviewTarget(other)
 end)
 
 LocalPlayer.CharacterAdded:Connect(function()
+	invalidatePending(nil)
 	if root.Visible then
 		closeReviewPanel("local_respawn")
 	end
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
+	if pendingReviewTarget == player then
+		invalidatePending(nil)
+	end
+
 	if not root.Visible then
 		return
 	end
