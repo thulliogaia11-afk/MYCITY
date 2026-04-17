@@ -42,6 +42,9 @@ local selectedRating: number? = nil
 
 local summaryFetchToken = 0
 
+-- Cancels periodic eligibility refresh when the panel closes or target changes.
+local eligibilityRefreshSeq = 0
+
 -- Pending confirmation (panel not open yet): first click selects, second click opens.
 local pendingReviewTarget: Player? = nil
 local pendingReviewSeq = 0
@@ -65,7 +68,7 @@ local root = Instance.new("Frame")
 root.Name = "Panel"
 root.AnchorPoint = Vector2.new(1, 1)
 root.Position = UDim2.new(1, -20, 1, -88)
-root.Size = UDim2.fromOffset(320, 418)
+root.Size = UDim2.fromOffset(320, 452)
 root.BackgroundColor3 = NAVY
 root.BorderSizePixel = 0
 root.Visible = false
@@ -147,10 +150,24 @@ targetUserLbl.TextXAlignment = Enum.TextXAlignment.Left
 targetUserLbl.Text = ""
 targetUserLbl.Parent = root
 
+local eligibilityLbl = Instance.new("TextLabel")
+eligibilityLbl.Name = "EligibilityStatus"
+eligibilityLbl.BackgroundTransparency = 1
+eligibilityLbl.Size = UDim2.new(1, 0, 0, 32)
+eligibilityLbl.LayoutOrder = 4
+eligibilityLbl.Font = Enum.Font.GothamMedium
+eligibilityLbl.TextSize = 12
+eligibilityLbl.TextColor3 = TEXT_MUTED
+eligibilityLbl.TextXAlignment = Enum.TextXAlignment.Left
+eligibilityLbl.TextYAlignment = Enum.TextYAlignment.Top
+eligibilityLbl.TextWrapped = true
+eligibilityLbl.Text = ""
+eligibilityLbl.Parent = root
+
 local summaryLbl = Instance.new("TextLabel")
 summaryLbl.BackgroundTransparency = 1
-summaryLbl.Size = UDim2.new(1, 0, 0, 56)
-summaryLbl.LayoutOrder = 4
+summaryLbl.Size = UDim2.new(1, 0, 0, 64)
+summaryLbl.LayoutOrder = 5
 summaryLbl.Font = Enum.Font.Gotham
 summaryLbl.TextSize = 13
 summaryLbl.TextColor3 = TEXT_MUTED
@@ -163,7 +180,7 @@ summaryLbl.Parent = root
 local ratingSectionTitle = Instance.new("TextLabel")
 ratingSectionTitle.BackgroundTransparency = 1
 ratingSectionTitle.Size = UDim2.new(1, 0, 0, 16)
-ratingSectionTitle.LayoutOrder = 5
+ratingSectionTitle.LayoutOrder = 6
 ratingSectionTitle.Font = Enum.Font.GothamBold
 ratingSectionTitle.TextSize = 12
 ratingSectionTitle.TextColor3 = TEXT_WHITE
@@ -174,7 +191,7 @@ ratingSectionTitle.Parent = root
 local ratingRow = Instance.new("Frame")
 ratingRow.BackgroundTransparency = 1
 ratingRow.Size = UDim2.new(1, 0, 0, 36)
-ratingRow.LayoutOrder = 6
+ratingRow.LayoutOrder = 7
 ratingRow.Parent = root
 
 local ratingLayout = Instance.new("UIListLayout")
@@ -184,7 +201,9 @@ ratingLayout.Padding = UDim.new(0, 6)
 ratingLayout.Parent = ratingRow
 
 local ratingButtons: { TextButton } = {}
+local ratingButtonStrokes: { UIStroke } = {}
 local defaultRatingBg = Color3.fromRGB(40, 44, 62)
+local ratingStrokeIdle = Color3.fromRGB(75, 80, 105)
 for i = 1, 5 do
 	local b = Instance.new("TextButton")
 	b.Name = "Rate" .. i
@@ -199,13 +218,19 @@ for i = 1, 5 do
 	local bc = Instance.new("UICorner")
 	bc.CornerRadius = UDim.new(0, 6)
 	bc.Parent = b
+	local st = Instance.new("UIStroke")
+	st.Color = ratingStrokeIdle
+	st.Thickness = 1
+	st.Transparency = 0.45
+	st.Parent = b
 	table.insert(ratingButtons, b)
+	table.insert(ratingButtonStrokes, st)
 end
 
 local ratingHintLbl = Instance.new("TextLabel")
 ratingHintLbl.BackgroundTransparency = 1
 ratingHintLbl.Size = UDim2.new(1, 0, 0, 14)
-ratingHintLbl.LayoutOrder = 7
+ratingHintLbl.LayoutOrder = 8
 ratingHintLbl.Font = Enum.Font.Gotham
 ratingHintLbl.TextSize = 11
 ratingHintLbl.TextColor3 = TEXT_MUTED
@@ -216,7 +241,7 @@ ratingHintLbl.Parent = root
 local commentTitle = Instance.new("TextLabel")
 commentTitle.BackgroundTransparency = 1
 commentTitle.Size = UDim2.new(1, 0, 0, 16)
-commentTitle.LayoutOrder = 8
+commentTitle.LayoutOrder = 9
 commentTitle.Font = Enum.Font.GothamBold
 commentTitle.TextSize = 12
 commentTitle.TextColor3 = TEXT_WHITE
@@ -226,7 +251,7 @@ commentTitle.Parent = root
 
 local commentBox = Instance.new("TextBox")
 commentBox.Size = UDim2.new(1, 0, 0, 64)
-commentBox.LayoutOrder = 9
+commentBox.LayoutOrder = 10
 commentBox.BackgroundColor3 = Color3.fromRGB(22, 28, 45)
 commentBox.TextColor3 = TEXT_WHITE
 commentBox.PlaceholderColor3 = TEXT_MUTED
@@ -252,8 +277,8 @@ cbPad.Parent = commentBox
 
 local statusLbl = Instance.new("TextLabel")
 statusLbl.BackgroundTransparency = 1
-statusLbl.Size = UDim2.new(1, 0, 0, 32)
-statusLbl.LayoutOrder = 10
+statusLbl.Size = UDim2.new(1, 0, 0, 30)
+statusLbl.LayoutOrder = 11
 statusLbl.Font = Enum.Font.Gotham
 statusLbl.TextSize = 12
 statusLbl.TextColor3 = TEXT_MUTED
@@ -266,7 +291,7 @@ statusLbl.Parent = root
 
 local submitBtn = Instance.new("TextButton")
 submitBtn.Size = UDim2.new(1, 0, 0, 36)
-submitBtn.LayoutOrder = 11
+submitBtn.LayoutOrder = 12
 submitBtn.BackgroundColor3 = SUCCESS
 submitBtn.TextColor3 = TEXT_WHITE
 submitBtn.Font = Enum.Font.GothamBold
@@ -321,7 +346,14 @@ end
 
 local function updateRatingButtonsVisual()
 	for i, b in ratingButtons do
-		b.BackgroundColor3 = (selectedRating == i) and ACCENT or defaultRatingBg
+		local sel = selectedRating == i
+		local stroke = ratingButtonStrokes[i]
+		b.BackgroundColor3 = sel and ACCENT or defaultRatingBg
+		if stroke then
+			stroke.Thickness = sel and 2.5 or 1
+			stroke.Color = sel and TEXT_WHITE or ratingStrokeIdle
+			stroke.Transparency = sel and 0.1 or 0.45
+		end
 	end
 	local canSubmit = selectedRating ~= nil
 	submitBtn.Active = canSubmit
@@ -456,6 +488,102 @@ local function eligibilityFailMessage(kind: string): string
 	return "Reviews are only for players in your city."
 end
 
+local WARN_AMBER = Color3.fromRGB(230, 175, 85)
+
+local function refreshPanelEligibilityStatus()
+	if not root.Visible or not selectedTargetUserId then
+		return
+	end
+	local plr = selectedTargetPlayer
+	if not plr or not plr.Parent then
+		eligibilityLbl.TextColor3 = DANGER
+		eligibilityLbl.Text = "This player is unavailable."
+		return
+	end
+	if not withinReviewDistanceTo(plr) then
+		eligibilityLbl.TextColor3 = WARN_AMBER
+		eligibilityLbl.Text = "Too far away — move closer."
+		return
+	end
+	local ok, raw = pcall(function()
+		return Remotes.GetReviewCityEligibility:InvokeServer(selectedTargetUserId)
+	end)
+	local eligible, kind = parseReviewEligibilityResponse(ok and raw or false)
+	if eligible then
+		eligibilityLbl.TextColor3 = SUCCESS
+		eligibilityLbl.Text = "Eligible to review."
+		return
+	end
+	if kind == "interaction" then
+		eligibilityLbl.TextColor3 = WARN_AMBER
+		eligibilityLbl.Text = "Interact a little longer before reviewing."
+	elseif kind == "city" then
+		eligibilityLbl.TextColor3 = DANGER
+		eligibilityLbl.Text = "You must be in the same city."
+	elseif kind == "unavailable" then
+		eligibilityLbl.TextColor3 = DANGER
+		eligibilityLbl.Text = "This player is unavailable."
+	else
+		eligibilityLbl.TextColor3 = DANGER
+		eligibilityLbl.Text = "You cannot review this player right now."
+	end
+end
+
+local function startEligibilityRefreshWhilePanelOpen()
+	eligibilityRefreshSeq += 1
+	local seq = eligibilityRefreshSeq
+	refreshPanelEligibilityStatus()
+	task.spawn(function()
+		while seq == eligibilityRefreshSeq and root.Visible do
+			task.wait(2)
+			if seq ~= eligibilityRefreshSeq or not root.Visible then
+				break
+			end
+			refreshPanelEligibilityStatus()
+		end
+	end)
+end
+
+local function mapSubmitRejectMessage(serverMsg: string): string
+	local s = string.lower(serverMsg)
+	if string.find(s, "recently interacted") or string.find(s, "interacted with") then
+		return "Spend more time nearby, then try again."
+	end
+	if string.find(s, "in your city") or string.find(s, "same city") then
+		return "You must be in the same city."
+	end
+	if string.find(s, "move closer") or string.find(s, "too far") then
+		return "Too far away — move closer."
+	end
+	if string.find(s, "not available") then
+		return "This player is unavailable."
+	end
+	if string.find(s, "please wait") then
+		return serverMsg
+	end
+	if string.find(s, "not ready") then
+		return "Your data isn't ready yet."
+	end
+	if string.find(s, "invalid review") then
+		return "Invalid review target."
+	end
+	if string.find(s, "yourself") then
+		return "You can't review yourself."
+	end
+	if string.find(s, "could not save") or string.find(s, "couldn't save") then
+		return "Couldn't save review. Try again."
+	end
+	return serverMsg
+end
+
+local function shortSubmitSuccessMessage(serverMsg: string?): string
+	local s = typeof(serverMsg) == "string" and serverMsg or ""
+	if string.find(string.lower(s), "updated") then
+		return "Review updated."
+	end
+	return "Review submitted."
+end
+
 local function hidePendingHint()
 	pendingHint.Visible = false
 	pendingHintLbl.Text = ""
@@ -500,29 +628,26 @@ local function renderSummary(summary: any)
 	end
 
 	local avg = tonumber(summary.averageRating) or 0
-	local total = tonumber(summary.totalReviews) or 0
+	local total = math.max(0, math.floor(tonumber(summary.totalReviews) or 0))
 	summaryLbl.TextColor3 = TEXT_MUTED
 
-	local lines = {
-		string.format("Average rating: %.1f / 5", avg),
-		string.format("Total reviews: %d", total),
-	}
+	local header = string.format("Average %.1f / 5   ·   %d reviews", avg, total)
 
 	local snippet = ""
 	if typeof(summary.reviews) == "table" and #(summary.reviews :: { any }) > 0 then
 		local first = (summary.reviews :: { any })[1]
 		if typeof(first) == "table" then
 			local c = typeof((first :: any).comment) == "string" and (first :: any).comment or ""
-			if #c > 72 then
-				c = string.sub(c, 1, 69) .. "..."
+			if #c > 80 then
+				c = string.sub(c, 1, 77) .. "..."
 			end
 			if c ~= "" then
-				snippet = "\nLatest: " .. c
+				snippet = "\n\nLatest comment\n" .. c
 			end
 		end
 	end
 
-	summaryLbl.Text = table.concat(lines, "\n") .. snippet
+	summaryLbl.Text = header .. snippet
 end
 
 local function fetchSummaryForLockedTarget(): ()
@@ -550,6 +675,9 @@ local function fetchSummaryForLockedTarget(): ()
 		end
 
 		renderSummary(result)
+		if token == summaryFetchToken and root.Visible then
+			refreshPanelEligibilityStatus()
+		end
 		local nameForLog = targetLogName(selectedTargetPlayer, uid)
 		if typeof(result) == "table" and result.success == true then
 			log(
@@ -615,7 +743,8 @@ local function submitReviewForLockedTarget(): ()
 		end
 
 		if typeof(result) == "table" and result.success == true then
-			showFeedback(tostring(result.message or "Saved."), false)
+			local sm = typeof((result :: any).message) == "string" and (result :: any).message or ""
+			showFeedback(shortSubmitSuccessMessage(sm), false)
 			log(
 				"review submitted for %s (avg=%.1f total=%d)",
 				nameForLog,
@@ -626,9 +755,9 @@ local function submitReviewForLockedTarget(): ()
 			return
 		end
 
-		local msg = typeof(result) == "table" and tostring(result.message or "Rejected.") or "Rejected."
-		showFeedback(msg, true)
-		log("review rejected for %s: %s", nameForLog, msg)
+		local rawMsg = typeof(result) == "table" and tostring((result :: any).message or "Rejected.") or "Rejected."
+		showFeedback(mapSubmitRejectMessage(rawMsg), true)
+		log("review rejected for %s: %s", nameForLog, rawMsg)
 	end)
 end
 
@@ -638,6 +767,7 @@ local function closeReviewPanel(reason: string?)
 	local nm = targetLogName(plr, uid)
 
 	summaryFetchToken += 1
+	eligibilityRefreshSeq += 1
 	invalidatePending(nil)
 
 	selectedTargetPlayer = nil
@@ -651,6 +781,8 @@ local function closeReviewPanel(reason: string?)
 
 	targetDisplayLbl.Text = ""
 	targetUserLbl.Text = ""
+	eligibilityLbl.Text = ""
+	eligibilityLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.Text = ""
 
@@ -679,6 +811,8 @@ local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 	local display = target.DisplayName ~= "" and target.DisplayName or target.Name
 	targetDisplayLbl.Text = display
 	targetUserLbl.Text = "@" .. target.Name
+	eligibilityLbl.Text = ""
+	eligibilityLbl.TextColor3 = TEXT_MUTED
 
 	root.Visible = true
 
@@ -689,6 +823,7 @@ local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 	end
 
 	fetchSummaryForLockedTarget()
+	startEligibilityRefreshWhilePanelOpen()
 end
 
 closeBtn.MouseButton1Click:Connect(function()
@@ -782,6 +917,8 @@ Players.PlayerRemoving:Connect(function(player: Player)
 
 	summaryLbl.TextColor3 = DANGER
 	summaryLbl.Text = "This player left the game."
+	eligibilityLbl.TextColor3 = DANGER
+	eligibilityLbl.Text = "This player is unavailable."
 	local leftId = player.UserId
 	task.delay(1.2, function()
 		if selectedTargetUserId == leftId then
