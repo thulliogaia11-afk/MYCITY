@@ -27,14 +27,17 @@ local MissionAvailable = makeEvent("MissionAvailable")
 local MissionCompleted = makeEvent("MissionCompleted")
 local MissionExpired = makeEvent("MissionExpired")
 local OpenWardrobe = makeEvent("OpenWardrobe")
+local OpenClubDrinks = makeEvent("OpenClubDrinks")
 local GetPlayerData = makeFunction("GetPlayerData")
 local GetAvailableJobs = makeFunction("GetAvailableJobs")
 local StartWork = makeFunction("StartWork")
 local StopWork = makeFunction("StopWork")
-local CompleteMission = makeFunction("CompleteMission")
 local GetMissionProgress = makeFunction("GetMissionProgress")
 local LeaveReview = makeFunction("LeaveReview")
 local GetReviews = makeFunction("GetReviews")
+local SubmitPlayerReview = makeFunction("SubmitPlayerReview")
+local GetPlayerReviewSummary = makeFunction("GetPlayerReviewSummary")
+local GetReviewCityEligibility = makeFunction("GetReviewCityEligibility")
 local BuyHouse = makeFunction("BuyHouse")
 local GetHouses = makeFunction("GetHouses")
 local GetRanking = makeFunction("GetRanking")
@@ -58,6 +61,7 @@ local EquipOutfit = makeFunction("EquipOutfit")
 local GetActiveMissions = makeFunction("GetActiveMissions")
 local GetDailyProgress = makeFunction("GetDailyProgress")
 local DebugSpawnMission = makeFunction("DebugSpawnMission")
+local PurchaseClubDrink = makeFunction("PurchaseClubDrink")
 
 print("[SERVER] All remotes created")
 
@@ -80,23 +84,45 @@ print("[SERVER] Loading OutfitService...")
 local OutfitService = require(script.services.OutfitService)
 print("[SERVER] Loading ClubService...")
 local ClubService = require(script.services.ClubService)
+print("[SERVER] Loading ClubFacadeService...")
+local ClubFacadeService = require(script.services.ClubFacadeService)
 print("[SERVER] Loading ClubDoorService...")
 local ClubDoorService = require(script.services.ClubDoorService)
+print("[SERVER] Loading DrinkService...")
+local DrinkService = require(script.services.DrinkService)
+print("[SERVER] Loading SocialRatingService...")
+local SocialRatingService = require(script.services.SocialRatingService)
+print("[SERVER] Loading ReviewService...")
+local ReviewService = require(script.services.ReviewService)
 print("[SERVER] Loading HouseEntryService...")
 local HouseEntryService = require(script.services.HouseEntryService)
 print("[SERVER] Loading ShopService...")
 local ShopService = require(script.services.ShopService)
 print("[SERVER] Loading MissionService...")
 local MissionService = require(script.services.MissionService)
+ClubFacadeService.Start()
+DrinkService.Start()
+MissionService.Initialize()
 print("[SERVER] All services loaded")
 
 -- Step 3: Register remote handlers
 GetAvailableJobs.OnServerInvoke = function(player)
 	print("[SERVER] GetAvailableJobs by", player.Name)
-	return JobService.GetAvailableJobs(player)
+	local ok, result = pcall(function()
+		return JobService.GetAvailableJobs(player)
+	end)
+	if not ok then
+		warn("[SERVER] GetAvailableJobs error:", result)
+		return {}
+	end
+	print("[SERVER] GetAvailableJobs returning", type(result), result and #result or 0)
+	return result or {}
 end
 
 GetPlayerData.OnServerInvoke = function(player)
+	if not PlayerDataService.HasSession(player) then
+		return nil
+	end
 	return PlayerDataService.GetData(player)
 end
 
@@ -125,20 +151,28 @@ StopWork.OnServerInvoke = function(player)
 	return true
 end
 
-CompleteMission.OnServerInvoke = function(player, jobName)
-	return JobService.CompleteMission(player, jobName)
-end
-
 GetMissionProgress.OnServerInvoke = function(player)
 	return JobService.GetMissionProgress(player)
 end
 
 LeaveReview.OnServerInvoke = function(player, targetUserId, stars, comment)
-	return JobService.LeaveReview(player, targetUserId, stars, comment)
+	return ReviewService.SubmitReview(player, targetUserId, stars, comment)
 end
 
 GetReviews.OnServerInvoke = function(player, targetUserId)
-	return JobService.GetReviews(player, targetUserId)
+	return ReviewService.GetPlayerReviewSummary(player, targetUserId)
+end
+
+SubmitPlayerReview.OnServerInvoke = function(player, targetUserId, rating, comment)
+	return ReviewService.SubmitReview(player, targetUserId, rating, comment)
+end
+
+GetPlayerReviewSummary.OnServerInvoke = function(player, targetUserId)
+	return ReviewService.GetPlayerReviewSummary(player, targetUserId)
+end
+
+GetReviewCityEligibility.OnServerInvoke = function(player, targetUserId)
+	return ReviewService.CanReviewTargetForCity(player, targetUserId)
 end
 
 BuyHouse.OnServerInvoke = function(player, level)
@@ -323,6 +357,10 @@ end
 
 GetDailyProgress.OnServerInvoke = function(player)
 	return MissionService.GetDailyProgress(player)
+end
+
+PurchaseClubDrink.OnServerInvoke = function(player, clubName, drinkId)
+	return DrinkService.PurchaseDrink(player, clubName, drinkId)
 end
 
 -- Temporary admin debug: remove when no longer needed.

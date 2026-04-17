@@ -15,6 +15,9 @@ local Remotes = require(game.ReplicatedStorage:WaitForChild("Shared"):WaitForChi
 
 local LOG_PREFIX = "[CLIENT][PlayerReview]"
 
+-- Max distance (studs) from local character to target to open or submit a review.
+local MAX_REVIEW_DISTANCE_STUDS = 18
+
 local function log(fmt: string, ...: any)
 	print(string.format(LOG_PREFIX .. " " .. fmt, ...))
 end
@@ -316,6 +319,32 @@ local function isScreenPointOverScreenGui(screenPos: Vector2): boolean
 	return #GuiService:GetGuiObjectsAtPosition(screenPos.X, screenPos.Y) > 0
 end
 
+local function getRootPart(char: Model): BasePart?
+	local r = char:FindFirstChild("HumanoidRootPart")
+	if r and r:IsA("BasePart") then
+		return r
+	end
+	if char.PrimaryPart and char.PrimaryPart:IsA("BasePart") then
+		return char.PrimaryPart
+	end
+	return nil
+end
+
+-- True if both characters exist and HRPs are within MAX_REVIEW_DISTANCE_STUDS.
+local function withinReviewDistanceTo(other: Player): boolean
+	local myChar = LocalPlayer.Character
+	local theirChar = other.Character
+	if not myChar or not theirChar then
+		return false
+	end
+	local a = getRootPart(myChar)
+	local b = getRootPart(theirChar)
+	if not a or not b then
+		return false
+	end
+	return (a.Position - b.Position).Magnitude <= MAX_REVIEW_DISTANCE_STUDS
+end
+
 -- Resolve another Player from a world click, or nil (self, NPC, empty sky, HUD click).
 local function resolveOtherPlayerFromScreenPoint(screenPos: Vector2): Player?
 	if isScreenPointOverScreenGui(screenPos) then
@@ -445,6 +474,25 @@ local function submitReviewForLockedTarget(): ()
 		return
 	end
 
+	local targetPlr = selectedTargetPlayer
+	if not targetPlr or not targetPlr.Parent then
+		showFeedback("Target is no longer available.", true)
+		return
+	end
+
+	if not withinReviewDistanceTo(targetPlr) then
+		showFeedback("Move closer to submit a review.", true)
+		return
+	end
+
+	local okElig, cityOk = pcall(function()
+		return Remotes.GetReviewCityEligibility:InvokeServer(uid)
+	end)
+	if not okElig or cityOk ~= true then
+		showFeedback("Reviews are only for players in your city.", true)
+		return
+	end
+
 	clearFeedback()
 	submitBtn.Active = false
 
@@ -570,7 +618,28 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed: boolean)
 		return
 	end
 
+	if not withinReviewDistanceTo(other) then
+		return
+	end
+
+	local okElig, cityOk = pcall(function()
+		return Remotes.GetReviewCityEligibility:InvokeServer(other.UserId)
+	end)
+	local eligible = okElig and cityOk == true
+	if not eligible then
+		if root.Visible then
+			showFeedback("Reviews are only for players in your city.", true)
+		end
+		return
+	end
+
 	openReviewPanel(other)
+end)
+
+LocalPlayer.CharacterAdded:Connect(function()
+	if root.Visible then
+		closeReviewPanel("local_respawn")
+	end
 end)
 
 Players.PlayerRemoving:Connect(function(player: Player)
