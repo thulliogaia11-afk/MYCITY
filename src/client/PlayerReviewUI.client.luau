@@ -68,7 +68,7 @@ local root = Instance.new("Frame")
 root.Name = "Panel"
 root.AnchorPoint = Vector2.new(1, 1)
 root.Position = UDim2.new(1, -20, 1, -88)
-root.Size = UDim2.fromOffset(320, 452)
+root.Size = UDim2.fromOffset(320, 492)
 root.BackgroundColor3 = NAVY
 root.BorderSizePixel = 0
 root.Visible = false
@@ -166,7 +166,7 @@ eligibilityLbl.Parent = root
 
 local summaryLbl = Instance.new("TextLabel")
 summaryLbl.BackgroundTransparency = 1
-summaryLbl.Size = UDim2.new(1, 0, 0, 64)
+summaryLbl.Size = UDim2.new(1, 0, 0, 34)
 summaryLbl.LayoutOrder = 5
 summaryLbl.Font = Enum.Font.Gotham
 summaryLbl.TextSize = 13
@@ -177,10 +177,46 @@ summaryLbl.TextWrapped = true
 summaryLbl.Text = ""
 summaryLbl.Parent = root
 
+local recentReviewsScroll = Instance.new("ScrollingFrame")
+recentReviewsScroll.Name = "RecentReviews"
+recentReviewsScroll.BackgroundTransparency = 0.25
+recentReviewsScroll.BackgroundColor3 = Color3.fromRGB(18, 22, 38)
+recentReviewsScroll.BorderSizePixel = 0
+recentReviewsScroll.Size = UDim2.new(1, 0, 0, 96)
+recentReviewsScroll.LayoutOrder = 6
+recentReviewsScroll.ScrollBarThickness = 4
+recentReviewsScroll.ScrollBarImageColor3 = ACCENT
+recentReviewsScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+recentReviewsScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+recentReviewsScroll.ScrollingDirection = Enum.ScrollingDirection.Y
+recentReviewsScroll.ClipsDescendants = true
+recentReviewsScroll.Parent = root
+local rrCorner = Instance.new("UICorner")
+rrCorner.CornerRadius = UDim.new(0, 6)
+rrCorner.Parent = recentReviewsScroll
+local rrPad = Instance.new("UIPadding")
+rrPad.PaddingTop = UDim.new(0, 6)
+rrPad.PaddingBottom = UDim.new(0, 6)
+rrPad.PaddingLeft = UDim.new(0, 8)
+rrPad.PaddingRight = UDim.new(0, 10)
+rrPad.Parent = recentReviewsScroll
+
+local recentReviewsList = Instance.new("Frame")
+recentReviewsList.Name = "RecentReviewsList"
+recentReviewsList.BackgroundTransparency = 1
+recentReviewsList.Size = UDim2.new(1, 0, 0, 0)
+recentReviewsList.AutomaticSize = Enum.AutomaticSize.Y
+recentReviewsList.Parent = recentReviewsScroll
+
+local recentReviewsLayout = Instance.new("UIListLayout")
+recentReviewsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+recentReviewsLayout.Padding = UDim.new(0, 6)
+recentReviewsLayout.Parent = recentReviewsList
+
 local ratingSectionTitle = Instance.new("TextLabel")
 ratingSectionTitle.BackgroundTransparency = 1
 ratingSectionTitle.Size = UDim2.new(1, 0, 0, 16)
-ratingSectionTitle.LayoutOrder = 6
+ratingSectionTitle.LayoutOrder = 7
 ratingSectionTitle.Font = Enum.Font.GothamBold
 ratingSectionTitle.TextSize = 12
 ratingSectionTitle.TextColor3 = TEXT_WHITE
@@ -191,7 +227,7 @@ ratingSectionTitle.Parent = root
 local ratingRow = Instance.new("Frame")
 ratingRow.BackgroundTransparency = 1
 ratingRow.Size = UDim2.new(1, 0, 0, 36)
-ratingRow.LayoutOrder = 7
+ratingRow.LayoutOrder = 8
 ratingRow.Parent = root
 
 local ratingLayout = Instance.new("UIListLayout")
@@ -230,7 +266,7 @@ end
 local ratingHintLbl = Instance.new("TextLabel")
 ratingHintLbl.BackgroundTransparency = 1
 ratingHintLbl.Size = UDim2.new(1, 0, 0, 14)
-ratingHintLbl.LayoutOrder = 8
+ratingHintLbl.LayoutOrder = 9
 ratingHintLbl.Font = Enum.Font.Gotham
 ratingHintLbl.TextSize = 11
 ratingHintLbl.TextColor3 = TEXT_MUTED
@@ -241,7 +277,7 @@ ratingHintLbl.Parent = root
 local commentTitle = Instance.new("TextLabel")
 commentTitle.BackgroundTransparency = 1
 commentTitle.Size = UDim2.new(1, 0, 0, 16)
-commentTitle.LayoutOrder = 9
+commentTitle.LayoutOrder = 10
 commentTitle.Font = Enum.Font.GothamBold
 commentTitle.TextSize = 12
 commentTitle.TextColor3 = TEXT_WHITE
@@ -251,7 +287,7 @@ commentTitle.Parent = root
 
 local commentBox = Instance.new("TextBox")
 commentBox.Size = UDim2.new(1, 0, 0, 64)
-commentBox.LayoutOrder = 10
+commentBox.LayoutOrder = 11
 commentBox.BackgroundColor3 = Color3.fromRGB(22, 28, 45)
 commentBox.TextColor3 = TEXT_WHITE
 commentBox.PlaceholderColor3 = TEXT_MUTED
@@ -278,7 +314,7 @@ cbPad.Parent = commentBox
 local statusLbl = Instance.new("TextLabel")
 statusLbl.BackgroundTransparency = 1
 statusLbl.Size = UDim2.new(1, 0, 0, 30)
-statusLbl.LayoutOrder = 11
+statusLbl.LayoutOrder = 12
 statusLbl.Font = Enum.Font.Gotham
 statusLbl.TextSize = 12
 statusLbl.TextColor3 = TEXT_MUTED
@@ -291,7 +327,7 @@ statusLbl.Parent = root
 
 local submitBtn = Instance.new("TextButton")
 submitBtn.Size = UDim2.new(1, 0, 0, 36)
-submitBtn.LayoutOrder = 12
+submitBtn.LayoutOrder = 13
 submitBtn.BackgroundColor3 = SUCCESS
 submitBtn.TextColor3 = TEXT_WHITE
 submitBtn.Font = Enum.Font.GothamBold
@@ -584,6 +620,142 @@ local function shortSubmitSuccessMessage(serverMsg: string?): string
 	return "Review submitted."
 end
 
+local STAR_FILL = Color3.fromRGB(255, 215, 120)
+
+local function ratingStarsGlyphs(rating: number): string
+	local r = math.clamp(math.floor(rating + 0.5), 1, 5)
+	return string.rep("★", r) .. string.rep("☆", 5 - r)
+end
+
+local function truncateForCard(s: string, maxLen: number): string
+	if #s <= maxLen then
+		return s
+	end
+	return string.sub(s, 1, maxLen - 3) .. "..."
+end
+
+-- Short relative label; uses calendar day for "yesterday" / "Nd ago".
+local function formatRelativeShort(createdAt: number): string
+	local now = os.time()
+	local diff = math.max(0, now - createdAt)
+	if diff < 50 then
+		return "just now"
+	end
+	if diff < 3600 then
+		local m = math.max(1, math.floor(diff / 60))
+		return string.format("%dm ago", m)
+	end
+
+	local tNow = os.date("*t", now)
+	local tTs = os.date("*t", createdAt)
+	local startToday =
+		os.time({ year = tNow.year, month = tNow.month, day = tNow.day, hour = 12, min = 0, sec = 0 })
+	local startCreated =
+		os.time({ year = tTs.year, month = tTs.month, day = tTs.day, hour = 12, min = 0, sec = 0 })
+	local daysBehind = math.floor((startToday - startCreated) / 86400 + 0.5)
+
+	if daysBehind <= 0 then
+		local h = math.max(1, math.floor(diff / 3600))
+		return string.format("%dh ago", h)
+	end
+	if daysBehind == 1 then
+		return "yesterday"
+	end
+	return string.format("%dd ago", daysBehind)
+end
+
+local function clearRecentReviewRows()
+	for _, ch in ipairs(recentReviewsList:GetChildren()) do
+		if not ch:IsA("UIListLayout") then
+			ch:Destroy()
+		end
+	end
+	recentReviewsScroll.CanvasPosition = Vector2.zero
+end
+
+local function appendRecentReviewRow(entry: any, layoutOrder: number)
+	if typeof(entry) ~= "table" then
+		return
+	end
+	local nameStr = typeof((entry :: any).reviewerName) == "string" and (entry :: any).reviewerName or "Player"
+	local rating = tonumber((entry :: any).rating) or 0
+	local comment = typeof((entry :: any).comment) == "string" and (entry :: any).comment or ""
+	local createdAt = tonumber((entry :: any).createdAt) or 0
+
+	local card = Instance.new("Frame")
+	card.BackgroundTransparency = 1
+	card.Size = UDim2.new(1, 0, 0, 0)
+	card.AutomaticSize = Enum.AutomaticSize.Y
+	card.LayoutOrder = layoutOrder
+
+	local v = Instance.new("UIListLayout")
+	v.SortOrder = Enum.SortOrder.LayoutOrder
+	v.Padding = UDim.new(0, 3)
+	v.FillDirection = Enum.FillDirection.Vertical
+	v.Parent = card
+
+	local top = Instance.new("Frame")
+	top.BackgroundTransparency = 1
+	top.Size = UDim2.new(1, 0, 0, 17)
+	top.LayoutOrder = 1
+
+	local topLayout = Instance.new("UIListLayout")
+	topLayout.FillDirection = Enum.FillDirection.Horizontal
+	topLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	topLayout.Padding = UDim.new(0, 6)
+	topLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	topLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	topLayout.Parent = top
+
+	local nameLbl = Instance.new("TextLabel")
+	nameLbl.BackgroundTransparency = 1
+	nameLbl.Size = UDim2.new(1, -132, 0, 17)
+	nameLbl.Font = Enum.Font.GothamMedium
+	nameLbl.TextSize = 12
+	nameLbl.TextColor3 = TEXT_WHITE
+	nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+	nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+	nameLbl.Text = nameStr
+	nameLbl.Parent = top
+
+	local starsLbl = Instance.new("TextLabel")
+	starsLbl.BackgroundTransparency = 1
+	starsLbl.Size = UDim2.new(0, 76, 0, 17)
+	starsLbl.Font = Enum.Font.GothamBold
+	starsLbl.TextSize = 11
+	starsLbl.TextColor3 = STAR_FILL
+	starsLbl.TextXAlignment = Enum.TextXAlignment.Center
+	starsLbl.Text = ratingStarsGlyphs(rating)
+	starsLbl.Parent = top
+
+	local timeLbl = Instance.new("TextLabel")
+	timeLbl.BackgroundTransparency = 1
+	timeLbl.Size = UDim2.new(0, 50, 0, 17)
+	timeLbl.Font = Enum.Font.Gotham
+	timeLbl.TextSize = 11
+	timeLbl.TextColor3 = TEXT_MUTED
+	timeLbl.TextXAlignment = Enum.TextXAlignment.Right
+	timeLbl.Text = formatRelativeShort(createdAt)
+	timeLbl.Parent = top
+
+	if comment ~= "" then
+		local cl = Instance.new("TextLabel")
+		cl.BackgroundTransparency = 1
+		cl.Size = UDim2.new(1, 0, 0, 0)
+		cl.AutomaticSize = Enum.AutomaticSize.Y
+		cl.Font = Enum.Font.Gotham
+		cl.TextSize = 11
+		cl.TextColor3 = TEXT_MUTED
+		cl.TextXAlignment = Enum.TextXAlignment.Left
+		cl.TextWrapped = true
+		cl.Text = truncateForCard(comment, 110)
+		cl.LayoutOrder = 2
+		cl.Parent = card
+	end
+
+	card.Parent = recentReviewsList
+end
+
 local function hidePendingHint()
 	pendingHint.Visible = false
 	pendingHintLbl.Text = ""
@@ -614,40 +786,57 @@ local function armPendingReviewTarget(target: Player)
 	end)
 end
 
-local function renderSummary(summary: any)
+local function renderSummary(summary: any, expectedToken: number)
+	if expectedToken ~= summaryFetchToken or not root.Visible then
+		return
+	end
 	if typeof(summary) ~= "table" then
 		summaryLbl.TextColor3 = DANGER
 		summaryLbl.Text = "Could not load summary."
+		clearRecentReviewRows()
 		return
 	end
 
 	if summary.success ~= true then
 		summaryLbl.TextColor3 = DANGER
 		summaryLbl.Text = tostring(summary.message or "Summary unavailable.")
+		clearRecentReviewRows()
 		return
 	end
 
 	local avg = tonumber(summary.averageRating) or 0
 	local total = math.max(0, math.floor(tonumber(summary.totalReviews) or 0))
 	summaryLbl.TextColor3 = TEXT_MUTED
+	summaryLbl.Text = string.format("Average %.1f / 5   ·   %d reviews", avg, total)
 
-	local header = string.format("Average %.1f / 5   ·   %d reviews", avg, total)
+	clearRecentReviewRows()
 
-	local snippet = ""
-	if typeof(summary.reviews) == "table" and #(summary.reviews :: { any }) > 0 then
-		local first = (summary.reviews :: { any })[1]
-		if typeof(first) == "table" then
-			local c = typeof((first :: any).comment) == "string" and (first :: any).comment or ""
-			if #c > 80 then
-				c = string.sub(c, 1, 77) .. "..."
-			end
-			if c ~= "" then
-				snippet = "\n\nLatest comment\n" .. c
-			end
-		end
+	if expectedToken ~= summaryFetchToken or not root.Visible then
+		return
 	end
 
-	summaryLbl.Text = header .. snippet
+	if total == 0 then
+		local empty = Instance.new("TextLabel")
+		empty.BackgroundTransparency = 1
+		empty.Size = UDim2.new(1, 0, 0, 20)
+		empty.Font = Enum.Font.Gotham
+		empty.TextSize = 12
+		empty.TextColor3 = TEXT_MUTED
+		empty.TextXAlignment = Enum.TextXAlignment.Left
+		empty.Text = "No reviews yet."
+		empty.LayoutOrder = 1
+		empty.Parent = recentReviewsList
+		return
+	end
+
+	local revs = typeof(summary.reviews) == "table" and (summary.reviews :: { any }) or {}
+	local n = math.min(3, #revs)
+	for i = 1, n do
+		if expectedToken ~= summaryFetchToken or not root.Visible then
+			return
+		end
+		appendRecentReviewRow(revs[i], i)
+	end
 end
 
 local function fetchSummaryForLockedTarget(): ()
@@ -657,6 +846,7 @@ local function fetchSummaryForLockedTarget(): ()
 		return
 	end
 
+	clearRecentReviewRows()
 	summaryLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.Text = "Loading summary..."
 
@@ -670,11 +860,12 @@ local function fetchSummaryForLockedTarget(): ()
 		if not ok then
 			summaryLbl.TextColor3 = DANGER
 			summaryLbl.Text = "Summary request failed."
+			clearRecentReviewRows()
 			log("summary fetch failed userId=%s (%s)", tostring(uid), tostring(result))
 			return
 		end
 
-		renderSummary(result)
+		renderSummary(result, token)
 		if token == summaryFetchToken and root.Visible then
 			refreshPanelEligibilityStatus()
 		end
@@ -785,6 +976,7 @@ local function closeReviewPanel(reason: string?)
 	eligibilityLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.Text = ""
+	clearRecentReviewRows()
 
 	if reason and nm ~= "?" then
 		log("panel closed (%s) target=%s", reason, nm)
@@ -917,6 +1109,7 @@ Players.PlayerRemoving:Connect(function(player: Player)
 
 	summaryLbl.TextColor3 = DANGER
 	summaryLbl.Text = "This player left the game."
+	clearRecentReviewRows()
 	eligibilityLbl.TextColor3 = DANGER
 	eligibilityLbl.Text = "This player is unavailable."
 	local leftId = player.UserId
