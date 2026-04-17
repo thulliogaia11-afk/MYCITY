@@ -35,6 +35,7 @@ local TEXT_MUTED = Color3.fromRGB(160, 165, 185)
 local SUCCESS = Color3.fromRGB(60, 180, 110)
 local DANGER = Color3.fromRGB(220, 70, 80)
 local CORNER = UDim.new(0, 8)
+local SUBMIT_BTN_LOADING = Color3.fromRGB(50, 100, 70)
 
 -- ——— Locked selection (never infer target from text input) ———
 local selectedTargetPlayer: Player? = nil
@@ -42,6 +43,9 @@ local selectedTargetUserId: number? = nil
 local selectedRating: number? = nil
 
 local summaryFetchToken = 0
+
+-- True while SubmitPlayerReview is in flight; also used to ignore stale callback UI.
+local submitRequestInFlight = false
 
 -- Cancels periodic eligibility refresh when the panel closes or target changes.
 local eligibilityRefreshSeq = 0
@@ -424,9 +428,16 @@ local function updateRatingButtonsVisual()
 			stroke.Transparency = sel and 0.1 or 0.45
 		end
 	end
-	local canSubmit = selectedRating ~= nil
-	submitBtn.Active = canSubmit
-	submitBtn.BackgroundColor3 = canSubmit and SUCCESS or Color3.fromRGB(48, 56, 52)
+	if submitRequestInFlight then
+		submitBtn.Active = false
+		submitBtn.BackgroundColor3 = SUBMIT_BTN_LOADING
+		submitBtn.TextTransparency = 0.2
+	else
+		local canSubmit = selectedRating ~= nil
+		submitBtn.Active = canSubmit
+		submitBtn.BackgroundColor3 = canSubmit and SUCCESS or Color3.fromRGB(48, 56, 52)
+		submitBtn.TextTransparency = 0
+	end
 	ratingHintLbl.Text = if selectedRating
 		then string.format("Selected: %d / 5 stars", selectedRating)
 		else "Tap a number (1 = low, 5 = high)"
@@ -1118,6 +1129,10 @@ local function fetchSummaryForLockedTarget(): ()
 end
 
 local function submitReviewForLockedTarget(): ()
+	if submitRequestInFlight then
+		return
+	end
+
 	local uid = selectedTargetUserId
 	local rating = selectedRating
 	if not uid or not rating then
@@ -1145,17 +1160,39 @@ local function submitReviewForLockedTarget(): ()
 		return
 	end
 
-	clearFeedback()
-	submitBtn.Active = false
+	local sessionAtSubmit = summaryFetchToken
+	local uidAtSubmit = uid
+	local commentSnapshot = commentBox.Text
+
+	submitRequestInFlight = true
+	updateRatingButtonsVisual()
+	showFeedback("Submitting...", false)
 
 	task.spawn(function()
 		local ok, result = pcall(function()
-			return Remotes.SubmitPlayerReview:InvokeServer(uid, rating, commentBox.Text)
+			return Remotes.SubmitPlayerReview:InvokeServer(uidAtSubmit, rating, commentSnapshot)
 		end)
 
-		submitBtn.Active = selectedRating ~= nil
+		local lockedPlr = selectedTargetPlayer
+		local stillThisPanel = root.Visible
+			and sessionAtSubmit == summaryFetchToken
+			and selectedTargetUserId == uidAtSubmit
+			and lockedPlr ~= nil
+			and lockedPlr.UserId == uidAtSubmit
+			and lockedPlr.Parent ~= nil
 
-		local nameForLog = targetLogName(selectedTargetPlayer, uid)
+		if not stillThisPanel then
+			submitRequestInFlight = false
+			if root.Visible then
+				updateRatingButtonsVisual()
+			end
+			return
+		end
+
+		submitRequestInFlight = false
+		updateRatingButtonsVisual()
+
+		local nameForLog = targetLogName(selectedTargetPlayer, uidAtSubmit)
 
 		if not ok then
 			showFeedback("Submit failed.", true)
@@ -1189,6 +1226,7 @@ local function closeReviewPanel(reason: string?)
 
 	summaryFetchToken += 1
 	eligibilityRefreshSeq += 1
+	submitRequestInFlight = false
 	invalidatePending(nil)
 
 	selectedTargetPlayer = nil
@@ -1221,6 +1259,7 @@ local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 	invalidatePending(nil)
 
 	summaryFetchToken += 1
+	submitRequestInFlight = false
 
 	selectedTargetPlayer = target
 	selectedTargetUserId = target.UserId
