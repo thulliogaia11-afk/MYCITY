@@ -74,7 +74,7 @@ local root = Instance.new("Frame")
 root.Name = "Panel"
 root.AnchorPoint = Vector2.new(1, 1)
 root.Position = UDim2.new(1, -20, 1, -88)
-root.Size = UDim2.fromOffset(320, 492)
+root.Size = UDim2.fromOffset(320, 538)
 root.BackgroundColor3 = NAVY
 root.BorderSizePixel = 0
 root.Visible = false
@@ -156,11 +156,24 @@ targetUserLbl.TextXAlignment = Enum.TextXAlignment.Left
 targetUserLbl.Text = ""
 targetUserLbl.Parent = root
 
+local eligibilitySection = Instance.new("Frame")
+eligibilitySection.Name = "EligibilitySection"
+eligibilitySection.BackgroundTransparency = 1
+eligibilitySection.Size = UDim2.new(1, 0, 0, 0)
+eligibilitySection.AutomaticSize = Enum.AutomaticSize.Y
+eligibilitySection.LayoutOrder = 4
+eligibilitySection.Parent = root
+
+local eligibilitySectionLayout = Instance.new("UIListLayout")
+eligibilitySectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+eligibilitySectionLayout.Padding = UDim.new(0, 6)
+eligibilitySectionLayout.Parent = eligibilitySection
+
 local eligibilityLbl = Instance.new("TextLabel")
 eligibilityLbl.Name = "EligibilityStatus"
 eligibilityLbl.BackgroundTransparency = 1
-eligibilityLbl.Size = UDim2.new(1, 0, 0, 32)
-eligibilityLbl.LayoutOrder = 4
+eligibilityLbl.Size = UDim2.new(1, 0, 0, 28)
+eligibilityLbl.LayoutOrder = 1
 eligibilityLbl.Font = Enum.Font.GothamMedium
 eligibilityLbl.TextSize = 12
 eligibilityLbl.TextColor3 = TEXT_MUTED
@@ -168,7 +181,54 @@ eligibilityLbl.TextXAlignment = Enum.TextXAlignment.Left
 eligibilityLbl.TextYAlignment = Enum.TextYAlignment.Top
 eligibilityLbl.TextWrapped = true
 eligibilityLbl.Text = ""
-eligibilityLbl.Parent = root
+eligibilityLbl.Parent = eligibilitySection
+
+local checklistHost = Instance.new("Frame")
+checklistHost.Name = "EligibilityChecklist"
+checklistHost.BackgroundTransparency = 1
+checklistHost.Size = UDim2.new(1, 0, 0, 0)
+checklistHost.AutomaticSize = Enum.AutomaticSize.Y
+checklistHost.LayoutOrder = 2
+checklistHost.Parent = eligibilitySection
+
+local checklistLayout = Instance.new("UIListLayout")
+checklistLayout.SortOrder = Enum.SortOrder.LayoutOrder
+checklistLayout.Padding = UDim.new(0, 3)
+checklistLayout.Parent = checklistHost
+
+local CHECKLIST_ROW_LABELS = { "Within range", "Same city", "Recent interaction" }
+local checklistMarks: { TextLabel } = {}
+
+for i, rowTitle in ipairs(CHECKLIST_ROW_LABELS) do
+	local row = Instance.new("Frame")
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, 14)
+	row.LayoutOrder = i
+	row.Parent = checklistHost
+
+	local mark = Instance.new("TextLabel")
+	mark.BackgroundTransparency = 1
+	mark.Size = UDim2.new(0, 16, 1, 0)
+	mark.Font = Enum.Font.GothamBold
+	mark.TextSize = 12
+	mark.TextXAlignment = Enum.TextXAlignment.Left
+	mark.Text = "…"
+	mark.TextColor3 = TEXT_MUTED
+	mark.Parent = row
+
+	local rowLbl = Instance.new("TextLabel")
+	rowLbl.BackgroundTransparency = 1
+	rowLbl.Position = UDim2.new(0, 18, 0, 0)
+	rowLbl.Size = UDim2.new(1, -18, 1, 0)
+	rowLbl.Font = Enum.Font.Gotham
+	rowLbl.TextSize = 11
+	rowLbl.TextColor3 = TEXT_MUTED
+	rowLbl.TextXAlignment = Enum.TextXAlignment.Left
+	rowLbl.Text = rowTitle
+	rowLbl.Parent = row
+
+	table.insert(checklistMarks, mark)
+end
 
 local summaryLbl = Instance.new("TextLabel")
 summaryLbl.BackgroundTransparency = 1
@@ -748,25 +808,111 @@ end
 
 local WARN_AMBER = Color3.fromRGB(230, 175, 85)
 
+local function applyEligibilityChecklist(rangeState: string, cityState: string, interactionState: string)
+	local states = { rangeState, cityState, interactionState }
+	for idx = 1, 3 do
+		local mark = checklistMarks[idx]
+		local s = states[idx]
+		if mark then
+			if s == "pass" then
+				mark.Text = "✓"
+				mark.TextColor3 = SUCCESS
+			elseif s == "fail" then
+				mark.Text = "✗"
+				mark.TextColor3 = DANGER
+			else
+				mark.Text = "…"
+				mark.TextColor3 = TEXT_MUTED
+			end
+		end
+	end
+end
+
 local function refreshPanelEligibilityStatus()
 	if not root.Visible or not selectedTargetUserId then
 		return
 	end
+
+	local uidAtRefresh = selectedTargetUserId
+	local seqAtRefresh = eligibilityRefreshSeq
+
+	local function stale(): boolean
+		return eligibilityRefreshSeq ~= seqAtRefresh or selectedTargetUserId ~= uidAtRefresh or not root.Visible
+	end
+
 	local plr = selectedTargetPlayer
+
 	if not plr or not plr.Parent then
+		if stale() then
+			return
+		end
 		eligibilityLbl.TextColor3 = DANGER
 		eligibilityLbl.Text = "This player is unavailable."
+		applyEligibilityChecklist("fail", "fail", "fail")
 		return
 	end
-	if not withinReviewDistanceTo(plr) then
+
+	local inRange = withinReviewDistanceTo(plr)
+
+	if not inRange then
+		if stale() then
+			return
+		end
 		eligibilityLbl.TextColor3 = WARN_AMBER
 		eligibilityLbl.Text = "Too far away — move closer."
+		applyEligibilityChecklist("fail", "unknown", "unknown")
 		return
 	end
+
+	if stale() then
+		return
+	end
+	eligibilityLbl.TextColor3 = TEXT_MUTED
+	eligibilityLbl.Text = "Updating…"
+	applyEligibilityChecklist("pass", "unknown", "unknown")
+
 	local ok, raw = pcall(function()
-		return Remotes.GetReviewCityEligibility:InvokeServer(selectedTargetUserId)
+		return Remotes.GetReviewCityEligibility:InvokeServer(uidAtRefresh)
 	end)
-	local eligible, kind = parseReviewEligibilityResponse(ok and raw or false)
+
+	if stale() then
+		return
+	end
+
+	if not ok then
+		eligibilityLbl.TextColor3 = DANGER
+		eligibilityLbl.Text = "Could not verify eligibility."
+		applyEligibilityChecklist("pass", "unknown", "unknown")
+		return
+	end
+
+	local eligible, kind = parseReviewEligibilityResponse(if ok then raw else false)
+
+	local cityState: string
+	local interactionState: string
+	if eligible then
+		cityState = "pass"
+		interactionState = "pass"
+	elseif kind == "city" then
+		cityState = "fail"
+		interactionState = "unknown"
+	elseif kind == "interaction" then
+		cityState = "pass"
+		interactionState = "fail"
+	elseif kind == "unavailable" then
+		cityState = "fail"
+		interactionState = "fail"
+	else
+		cityState = "fail"
+		interactionState = "fail"
+	end
+
+	if stale() then
+		return
+	end
+
+	applyEligibilityChecklist("pass", cityState, interactionState)
+
 	if eligible then
 		eligibilityLbl.TextColor3 = SUCCESS
 		eligibilityLbl.Text = "Eligible to review."
@@ -1242,6 +1388,7 @@ local function closeReviewPanel(reason: string?)
 	targetUserLbl.Text = ""
 	eligibilityLbl.Text = ""
 	eligibilityLbl.TextColor3 = TEXT_MUTED
+	applyEligibilityChecklist("unknown", "unknown", "unknown")
 	summaryLbl.TextColor3 = TEXT_MUTED
 	summaryLbl.Text = ""
 	clearRecentReviewRows()
@@ -1274,6 +1421,7 @@ local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 	targetUserLbl.Text = "@" .. target.Name
 	eligibilityLbl.Text = ""
 	eligibilityLbl.TextColor3 = TEXT_MUTED
+	applyEligibilityChecklist("unknown", "unknown", "unknown")
 
 	root.Visible = true
 
@@ -1388,6 +1536,7 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	clearRecentReviewRows()
 	eligibilityLbl.TextColor3 = DANGER
 	eligibilityLbl.Text = "This player is unavailable."
+	applyEligibilityChecklist("fail", "fail", "fail")
 	local leftId = player.UserId
 	task.delay(1.2, function()
 		if selectedTargetUserId == leftId then
