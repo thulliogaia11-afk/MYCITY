@@ -19,6 +19,8 @@ local TEXT_DIM = Color3.fromRGB(165, 170, 188)
 
 local tagsByPlayer: { [Player]: BillboardGui } = {}
 
+local overheadBuildSeq = 0
+
 local function displayNameOf(plr: Player): string
 	return plr.DisplayName ~= "" and plr.DisplayName or plr.Name
 end
@@ -135,12 +137,24 @@ local function buildTagGui(head: BasePart, plr: Player, snap: any?): BillboardGu
 end
 
 local function scheduleTagBuild(plr: Player, charToken: Model, head: BasePart)
+	overheadBuildSeq += 1
+	local buildId = overheadBuildSeq
+	charToken:SetAttribute("__OverheadBuild", buildId)
+
 	task.spawn(function()
 		cleanupTag(plr)
+
+		if charToken:GetAttribute("__OverheadBuild") ~= buildId then
+			return
+		end
 
 		local ok, snap = pcall(function()
 			return Remotes.GetPlayerSocialTagSnapshot:InvokeServer(plr.UserId)
 		end)
+
+		if charToken:GetAttribute("__OverheadBuild") ~= buildId then
+			return
+		end
 
 		if not plr.Parent then
 			return
@@ -150,6 +164,10 @@ local function scheduleTagBuild(plr: Player, charToken: Model, head: BasePart)
 		end
 		local currentHead = charToken:FindFirstChild("Head")
 		if currentHead ~= head or not head:IsA("BasePart") or not head.Parent then
+			return
+		end
+
+		if charToken:GetAttribute("__OverheadBuild") ~= buildId then
 			return
 		end
 

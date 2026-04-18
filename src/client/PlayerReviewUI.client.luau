@@ -47,6 +47,9 @@ local summaryFetchToken = 0
 -- True while SubmitPlayerReview is in flight; also used to ignore stale callback UI.
 local submitRequestInFlight = false
 
+-- Last server+local eligibility gate for the locked target (drives submit enabled state).
+local panelSubmitEligible = false
+
 -- Cancels periodic eligibility refresh when the panel closes or target changes.
 local eligibilityRefreshSeq = 0
 
@@ -550,10 +553,10 @@ local function updateRatingButtonsVisual()
 		submitBtn.BackgroundColor3 = SUBMIT_BTN_LOADING
 		submitBtn.TextTransparency = 0.2
 	else
-		local canSubmit = selectedRating ~= nil
+		local canSubmit = selectedRating ~= nil and panelSubmitEligible
 		submitBtn.Active = canSubmit
 		submitBtn.BackgroundColor3 = canSubmit and SUCCESS or Color3.fromRGB(48, 56, 52)
-		submitBtn.TextTransparency = 0
+		submitBtn.TextTransparency = if canSubmit then 0 else 0.28
 	end
 	ratingHintLbl.Text = if selectedRating
 		then string.format("Selected: %d / 5 stars", selectedRating)
@@ -855,12 +858,12 @@ end)
 
 local function eligibilityFailMessage(kind: string): string
 	if kind == "interaction" then
-		return "You can only review players you've recently interacted with."
+		return "Need recent interaction nearby."
 	end
 	if kind == "unavailable" then
-		return "Target is not available."
+		return "Player unavailable."
 	end
-	return "Reviews are only for players in your city."
+	return "Same city required."
 end
 
 local WARN_AMBER = Color3.fromRGB(230, 175, 85)
@@ -904,8 +907,10 @@ local function refreshPanelEligibilityStatus()
 			return
 		end
 		eligibilityLbl.TextColor3 = DANGER
-		eligibilityLbl.Text = "This player is unavailable."
+		eligibilityLbl.Text = "Player unavailable."
 		applyEligibilityChecklist("fail", "fail", "fail")
+		panelSubmitEligible = false
+		updateRatingButtonsVisual()
 		return
 	end
 
@@ -916,8 +921,10 @@ local function refreshPanelEligibilityStatus()
 			return
 		end
 		eligibilityLbl.TextColor3 = WARN_AMBER
-		eligibilityLbl.Text = "Too far away — move closer."
+		eligibilityLbl.Text = "Too far to review."
 		applyEligibilityChecklist("fail", "unknown", "unknown")
+		panelSubmitEligible = false
+		updateRatingButtonsVisual()
 		return
 	end
 
@@ -925,8 +932,10 @@ local function refreshPanelEligibilityStatus()
 		return
 	end
 	eligibilityLbl.TextColor3 = TEXT_MUTED
-	eligibilityLbl.Text = "Updating…"
+	eligibilityLbl.Text = "Checking…"
 	applyEligibilityChecklist("pass", "unknown", "unknown")
+	panelSubmitEligible = false
+	updateRatingButtonsVisual()
 
 	local ok, raw = pcall(function()
 		return Remotes.GetReviewCityEligibility:InvokeServer(uidAtRefresh)
@@ -938,8 +947,10 @@ local function refreshPanelEligibilityStatus()
 
 	if not ok then
 		eligibilityLbl.TextColor3 = DANGER
-		eligibilityLbl.Text = "Could not verify eligibility."
+		eligibilityLbl.Text = "Eligibility check failed."
 		applyEligibilityChecklist("pass", "unknown", "unknown")
+		panelSubmitEligible = false
+		updateRatingButtonsVisual()
 		return
 	end
 
@@ -972,21 +983,27 @@ local function refreshPanelEligibilityStatus()
 
 	if eligible then
 		eligibilityLbl.TextColor3 = SUCCESS
-		eligibilityLbl.Text = "Eligible to review."
+		eligibilityLbl.Text = "Ready to submit."
+		panelSubmitEligible = true
+		updateRatingButtonsVisual()
 		return
 	end
+
+	panelSubmitEligible = false
+	updateRatingButtonsVisual()
+
 	if kind == "interaction" then
 		eligibilityLbl.TextColor3 = WARN_AMBER
-		eligibilityLbl.Text = "Interact a little longer before reviewing."
+		eligibilityLbl.Text = "Need more nearby interaction."
 	elseif kind == "city" then
 		eligibilityLbl.TextColor3 = DANGER
-		eligibilityLbl.Text = "You must be in the same city."
+		eligibilityLbl.Text = "Same city required."
 	elseif kind == "unavailable" then
 		eligibilityLbl.TextColor3 = DANGER
-		eligibilityLbl.Text = "This player is unavailable."
+		eligibilityLbl.Text = "Player unavailable."
 	else
 		eligibilityLbl.TextColor3 = DANGER
-		eligibilityLbl.Text = "You cannot review this player right now."
+		eligibilityLbl.Text = "Can't review right now."
 	end
 end
 
@@ -1007,17 +1024,21 @@ end
 
 local function mapSubmitRejectMessage(serverMsg: string): string
 	local s = string.lower(serverMsg)
+	local waitSec = string.match(serverMsg, "(%d+)%s*[Ss]econds")
+	if waitSec then
+		return string.format("Wait %ss before another review.", waitSec)
+	end
 	if string.find(s, "recently interacted") or string.find(s, "interacted with") then
 		return "Spend more time nearby, then try again."
 	end
 	if string.find(s, "in your city") or string.find(s, "same city") then
-		return "You must be in the same city."
+		return "Same city required."
 	end
 	if string.find(s, "move closer") or string.find(s, "too far") then
-		return "Too far away — move closer."
+		return "Too far to review."
 	end
 	if string.find(s, "not available") then
-		return "This player is unavailable."
+		return "Player unavailable."
 	end
 	if string.find(s, "please wait") then
 		return serverMsg
@@ -1220,7 +1241,7 @@ local function armPendingReviewTarget(target: Player)
 	local armSeq = pendingReviewSeq
 	pendingReviewTarget = target
 	pendingEligibilityPollNext = 0
-	pendingHintLbl.Text = string.format("Review %s — click again (%.1fs)", display, PENDING_CONFIRM_SECONDS)
+	pendingHintLbl.Text = string.format("%s — tap again to open · %.1fs", display, PENDING_CONFIRM_SECONDS)
 	pendingHint.Visible = true
 	log("pending target=%s (%d)", target.Name, target.UserId)
 	task.delay(PENDING_CONFIRM_SECONDS, function()
@@ -1259,7 +1280,7 @@ local function renderSummary(summary: any, expectedToken: number)
 	end
 	if typeof(summary) ~= "table" then
 		summaryLbl.TextColor3 = DANGER
-		summaryLbl.Text = "Could not load summary."
+		summaryLbl.Text = "Summary error."
 		clearRecentReviewRows()
 		setSocialIdentityFallback()
 		return
@@ -1267,7 +1288,7 @@ local function renderSummary(summary: any, expectedToken: number)
 
 	if summary.success ~= true then
 		summaryLbl.TextColor3 = DANGER
-		summaryLbl.Text = tostring(summary.message or "Summary unavailable.")
+		summaryLbl.Text = tostring(summary.message or "Unavailable.")
 		clearRecentReviewRows()
 		setSocialIdentityFallback()
 		return
@@ -1283,7 +1304,7 @@ local function renderSummary(summary: any, expectedToken: number)
 	applySocialIdentityFromSummary(summary, avg, total)
 
 	summaryLbl.TextColor3 = TEXT_MUTED
-	summaryLbl.Text = string.format("Average %.1f / 5   ·   %d reviews", avg, total)
+	summaryLbl.Text = string.format("%.1f / 5 · %d reviews", avg, total)
 
 	clearRecentReviewRows()
 
@@ -1324,7 +1345,7 @@ local function fetchSummaryForLockedTarget(): ()
 
 	clearRecentReviewRows()
 	summaryLbl.TextColor3 = TEXT_MUTED
-	summaryLbl.Text = "Loading summary..."
+	summaryLbl.Text = "Loading…"
 	setSocialIdentityLoading()
 
 	task.spawn(function()
@@ -1336,7 +1357,7 @@ local function fetchSummaryForLockedTarget(): ()
 		end
 		if not ok then
 			summaryLbl.TextColor3 = DANGER
-			summaryLbl.Text = "Summary request failed."
+			summaryLbl.Text = "Summary failed."
 			clearRecentReviewRows()
 			setSocialIdentityFallback()
 			log("summary fetch failed userId=%s (%s)", tostring(uid), tostring(result))
@@ -1379,12 +1400,16 @@ local function submitReviewForLockedTarget(): ()
 
 	local targetPlr = selectedTargetPlayer
 	if not targetPlr or not targetPlr.Parent then
-		showFeedback("Target is no longer available.", true)
+		showFeedback("Player left.", true)
 		return
 	end
 
 	if not withinReviewDistanceTo(targetPlr) then
-		showFeedback("Move closer to submit a review.", true)
+		showFeedback("Too far to submit.", true)
+		return
+	end
+
+	if not panelSubmitEligible then
 		return
 	end
 
@@ -1403,7 +1428,7 @@ local function submitReviewForLockedTarget(): ()
 
 	submitRequestInFlight = true
 	updateRatingButtonsVisual()
-	showFeedback("Submitting...", false)
+	showFeedback("Sending…", false)
 
 	task.spawn(function()
 		local ok, result = pcall(function()
@@ -1432,7 +1457,7 @@ local function submitReviewForLockedTarget(): ()
 		local nameForLog = targetLogName(selectedTargetPlayer, uidAtSubmit)
 
 		if not ok then
-			showFeedback("Submit failed.", true)
+			showFeedback("Submit failed — try again.", true)
 			log("review rejected for %s: invoke error %s", nameForLog, tostring(result))
 			return
 		end
@@ -1464,6 +1489,7 @@ local function closeReviewPanel(reason: string?)
 	summaryFetchToken += 1
 	eligibilityRefreshSeq += 1
 	submitRequestInFlight = false
+	panelSubmitEligible = false
 	invalidatePending(nil)
 
 	selectedTargetPlayer = nil
@@ -1499,6 +1525,7 @@ local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 
 	summaryFetchToken += 1
 	submitRequestInFlight = false
+	panelSubmitEligible = false
 
 	selectedTargetPlayer = target
 	selectedTargetUserId = target.UserId
@@ -1625,12 +1652,14 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	end
 
 	summaryLbl.TextColor3 = DANGER
-	summaryLbl.Text = "This player left the game."
+	summaryLbl.Text = "Player left."
 	clearRecentReviewRows()
 	eligibilityLbl.TextColor3 = DANGER
-	eligibilityLbl.Text = "This player is unavailable."
+	eligibilityLbl.Text = "Player left."
 	applyEligibilityChecklist("fail", "fail", "fail")
 	setSocialIdentityFallback()
+	panelSubmitEligible = false
+	updateRatingButtonsVisual()
 	local leftId = player.UserId
 	task.delay(1.2, function()
 		if selectedTargetUserId == leftId then
