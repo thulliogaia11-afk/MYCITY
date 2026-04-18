@@ -136,6 +136,25 @@ local function getShowNotification(): RemoteEvent?
 	return nil
 end
 
+local function getSocialIdentityChanged(): RemoteEvent?
+	local folder = ReplicatedStorage:FindFirstChild("MyCityRemotes")
+	if not folder then
+		return nil
+	end
+	local remote = folder:FindFirstChild("SocialIdentityChanged")
+	if remote and remote:IsA("RemoteEvent") then
+		return remote
+	end
+	return nil
+end
+
+local function fireSocialIdentityChanged(userId: number)
+	local ev = getSocialIdentityChanged()
+	if ev then
+		ev:FireAllClients(userId)
+	end
+end
+
 local function notify(player: Player, message: string, level: string)
 	local remote = getShowNotification()
 	if remote then
@@ -435,6 +454,8 @@ function ReviewService.SubmitReview(reviewerPlayer: Player, targetUserId: number
 		log(string.format("review rejected: failed to save review batch reviewer=%s target=%s", reviewerPlayer.Name, targetPlayer.Name))
 		return { success = false, message = "Could not save review." }
 	end
+
+	fireSocialIdentityChanged(targetPlayer.UserId)
 
 	reviewCooldownByUserId[reviewerPlayer.UserId] = nowTs
 	log(string.format(

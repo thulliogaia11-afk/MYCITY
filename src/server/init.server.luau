@@ -23,6 +23,7 @@ end
 
 local UpdatePlayerData = makeEvent("UpdatePlayerData")
 local ShowNotification = makeEvent("ShowNotification")
+local SocialIdentityChanged = makeEvent("SocialIdentityChanged")
 local MissionAvailable = makeEvent("MissionAvailable")
 local MissionCompleted = makeEvent("MissionCompleted")
 local MissionExpired = makeEvent("MissionExpired")

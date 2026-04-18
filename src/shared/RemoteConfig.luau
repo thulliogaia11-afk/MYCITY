@@ -9,6 +9,7 @@ local folder = ReplicatedStorage:WaitForChild("MyCityRemotes", 30)
 return {
 	UpdatePlayerData = folder:WaitForChild("UpdatePlayerData", 10),
 	ShowNotification = folder:WaitForChild("ShowNotification", 10),
+	SocialIdentityChanged = folder:WaitForChild("SocialIdentityChanged", 10),
 	MissionAvailable = folder:WaitForChild("MissionAvailable", 10),
 	MissionCompleted = folder:WaitForChild("MissionCompleted", 10),
 	MissionExpired = folder:WaitForChild("MissionExpired", 10),

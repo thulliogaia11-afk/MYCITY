@@ -1,6 +1,7 @@
 --[[
 	Subtle in-world social identity above other players.
-	Event-driven only (CharacterAdded / PlayerAdded / PlayerRemoving) — no per-frame scans.
+	Event-driven only (CharacterAdded / PlayerAdded / PlayerRemoving / SocialIdentityChanged)
+	— no polling or per-frame scans.
 ]]
 
 local Players = game:GetService("Players")
@@ -133,17 +134,10 @@ local function buildTagGui(head: BasePart, plr: Player, snap: any?): BillboardGu
 	return bb
 end
 
-local function attachForCharacter(plr: Player, char: Model)
-	cleanupTag(plr)
-
-	local head = char:WaitForChild("Head", 12)
-	if not head or not head:IsA("BasePart") then
-		return
-	end
-
-	local charToken = char
-
+local function scheduleTagBuild(plr: Player, charToken: Model, head: BasePart)
 	task.spawn(function()
+		cleanupTag(plr)
+
 		local ok, snap = pcall(function()
 			return Remotes.GetPlayerSocialTagSnapshot:InvokeServer(plr.UserId)
 		end)
@@ -154,12 +148,48 @@ local function attachForCharacter(plr: Player, char: Model)
 		if plr.Character ~= charToken then
 			return
 		end
-		if not head.Parent then
+		local currentHead = charToken:FindFirstChild("Head")
+		if currentHead ~= head or not head:IsA("BasePart") or not head.Parent then
 			return
 		end
 
 		local gui = buildTagGui(head, plr, if ok then snap else nil)
 		tagsByPlayer[plr] = gui
+	end)
+end
+
+local function attachForCharacter(plr: Player, char: Model)
+	local head = char:WaitForChild("Head", 12)
+	if not head or not head:IsA("BasePart") then
+		return
+	end
+
+	scheduleTagBuild(plr, char, head)
+end
+
+local function refreshTagForUserId(userId: number)
+	local plr = Players:GetPlayerByUserId(userId)
+	if not plr or plr == LocalPlayer or not plr.Parent then
+		return
+	end
+	local char = plr.Character
+	if not char then
+		return
+	end
+	local head = char:FindFirstChild("Head")
+	if not head or not head:IsA("BasePart") then
+		return
+	end
+
+	scheduleTagBuild(plr, char, head)
+end
+
+if Remotes.SocialIdentityChanged and Remotes.SocialIdentityChanged:IsA("RemoteEvent") then
+	(Remotes.SocialIdentityChanged :: RemoteEvent).OnClientEvent:Connect(function(userId: any)
+		if typeof(userId) ~= "number" then
+			return
+		end
+		refreshTagForUserId(userId)
 	end)
 end
 
