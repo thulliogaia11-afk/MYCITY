@@ -400,6 +400,17 @@ function ReviewService.SubmitReview(reviewerPlayer: Player, targetUserId: number
 		return { success = false, message = "Target player is not available." }
 	end
 
+	local ra = getHumanoidRoot(reviewerPlayer)
+	local rb = getHumanoidRoot(targetPlayer)
+	if
+		not ra
+		or not rb
+		or (ra.Position - rb.Position).Magnitude > MAX_INTERACTION_DISTANCE_STUDS
+	then
+		log(string.format("review rejected: %s too far from target %s", reviewerPlayer.Name, targetPlayer.Name))
+		return { success = false, message = "Move closer to review this player." }
+	end
+
 	if not reviewerSharesEligibleCity(reviewerPlayer, targetPlayer) then
 		log(string.format("review rejected: %s not same city as target %s", reviewerPlayer.Name, targetPlayer.Name))
 		return { success = false, message = "You can only review players in your city." }
