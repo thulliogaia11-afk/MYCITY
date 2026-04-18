@@ -37,6 +37,7 @@ local LeaveReview = makeFunction("LeaveReview")
 local GetReviews = makeFunction("GetReviews")
 local SubmitPlayerReview = makeFunction("SubmitPlayerReview")
 local GetPlayerReviewSummary = makeFunction("GetPlayerReviewSummary")
+local GetPlayerSocialTagSnapshot = makeFunction("GetPlayerSocialTagSnapshot")
 local GetReviewCityEligibility = makeFunction("GetReviewCityEligibility")
 local BuyHouse = makeFunction("BuyHouse")
 local GetHouses = makeFunction("GetHouses")
@@ -169,6 +170,10 @@ end
 
 GetPlayerReviewSummary.OnServerInvoke = function(player, targetUserId)
 	return ReviewService.GetPlayerReviewSummary(player, targetUserId)
+end
+
+GetPlayerSocialTagSnapshot.OnServerInvoke = function(player, targetUserId)
+	return ReviewService.GetPlayerSocialTagSnapshot(player, targetUserId)
 end
 
 GetReviewCityEligibility.OnServerInvoke = function(player, targetUserId)

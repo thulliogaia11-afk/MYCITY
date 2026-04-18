@@ -23,6 +23,7 @@ return {
 	GetReviews = folder:WaitForChild("GetReviews", 10),
 	SubmitPlayerReview = folder:WaitForChild("SubmitPlayerReview", 10),
 	GetPlayerReviewSummary = folder:WaitForChild("GetPlayerReviewSummary", 10),
+	GetPlayerSocialTagSnapshot = folder:WaitForChild("GetPlayerSocialTagSnapshot", 10),
 	GetReviewCityEligibility = folder:WaitForChild("GetReviewCityEligibility", 10),
 	BuyHouse = folder:WaitForChild("BuyHouse", 10),
 	GetHouses = folder:WaitForChild("GetHouses", 10),

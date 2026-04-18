@@ -496,6 +496,38 @@ function ReviewService.GetPlayerReviewSummary(_requestingPlayer: Player, targetU
 	}
 end
 
+-- Lightweight snapshot for overhead UI (no review list payload).
+function ReviewService.GetPlayerSocialTagSnapshot(_requestingPlayer: Player, targetUserId: number): {
+	success: boolean,
+	averageRating: number?,
+	totalReviews: number?,
+	socialTier: string?,
+	socialScore: number?,
+	message: string?,
+}
+	local targetPlayer = getTargetPlayer(targetUserId)
+	if not targetPlayer or not PlayerDataService.HasSession(targetPlayer) then
+		return {
+			success = false,
+			message = "Target player is not available.",
+		}
+	end
+
+	local targetData = PlayerDataService.GetData(targetPlayer)
+	local reviews = collectNormalizedReviews(targetData.Reviews)
+	local averageRating, totalReviews = recalculateAggregates(reviews)
+	local socialScore = typeof(targetData.SocialScore) == "number" and targetData.SocialScore or 0
+	local socialTier = SocialRatingService.GetTierForScore(socialScore)
+
+	return {
+		success = true,
+		averageRating = averageRating,
+		totalReviews = totalReviews,
+		socialTier = socialTier,
+		socialScore = socialScore,
+	}
+end
+
 Players.PlayerRemoving:Connect(function(player: Player)
 	reviewCooldownByUserId[player.UserId] = nil
 	clearInteractionStateForUser(player.UserId)
