@@ -236,7 +236,6 @@ GetElectionData.OnServerInvoke = function(player)
 		voterCount = snap.voterCount,
 		secondsUntilMandateEnds = snap.secondsUntilMandateEnds,
 		hasVoted = hasVoted,
-		hasPlayerVoted = hasVoted,
 		secondsUntilCurrentPhaseEnds = ElectionService.SecondsUntilCurrentPhaseEnd(cityName),
 		impeachment = snap.impeachment,
 		activeTrades = snap.activeTrades,

@@ -323,6 +323,14 @@ local lastPlayerData: any = nil
 local mandateCountdownValueLabel: TextLabel? = nil
 local lastMandateEndTimeForTick: number? = nil
 
+-- Forward declaration: fetchAndRedraw is defined later but referenced inside
+-- refreshUI (via Vote/Nominate button handlers). Without this forward declare,
+-- Luau resolves fetchAndRedraw as a global inside refreshUI — which is nil,
+-- causing task.defer(nil) to silently fail and the UI to only update on the
+-- next 10s refresh tick. Declaring it here ensures the handlers capture the
+-- local upvalue; the later 'function fetchAndRedraw()' assigns to this same var.
+local fetchAndRedraw: (() -> ())?
+
 local function setTab(name: string)
 	currentTab = name
 	frameStatus.Visible = name == "status"
@@ -499,7 +507,9 @@ local function refreshUI()
 
 	-- Candidates tab
 	local phase = edata.phase
-	local hasVoted = edata.hasVoted == true or edata.hasPlayerVoted == true
+	-- Single source of truth: server sends 'hasVoted'. Old fallback to 'hasPlayerVoted'
+	-- was a symptom of broken contract — removed alongside the duplicate field in init.server.luau.
+	local hasVoted = edata.hasVoted == true
 	local myId = localPlayer.UserId
 	local rep = tonumber(pdata.Reputation) or 0
 
@@ -605,7 +615,9 @@ local function refreshUI()
 					if success then
 						local m = if typeof(message) == "string" then message else "Vote recorded!"
 						showToast(m, "success")
-						task.defer(fetchAndRedraw)
+						if fetchAndRedraw then
+							task.defer(fetchAndRedraw)
+						end
 					else
 						errLabel.Text = tostring(message or "Could not vote.")
 						showToast(tostring(message or "Error"), "error")
@@ -778,7 +790,9 @@ local function refreshUI()
 		end
 		if success then
 			showToast(if typeof(response) == "string" then response else "Candidacy registered!", "success")
-			task.defer(fetchAndRedraw)
+			if fetchAndRedraw then
+				task.defer(fetchAndRedraw)
+			end
 		else
 			errLabel.Text = tostring(response or "Nomination rejected.")
 			showToast(tostring(response or "Error"), "error")
@@ -786,7 +800,8 @@ local function refreshUI()
 	end)
 end
 
-local function fetchAndRedraw()
+-- Assigns to the forward-declared 'fetchAndRedraw' above (no 'local' keyword).
+function fetchAndRedraw()
 	local okP, pdata = pcall(function()
 		return GetPlayerData:InvokeServer()
 	end)
@@ -821,7 +836,9 @@ end)
 openButton.MouseButton1Click:Connect(function()
 	panel.Visible = true
 	setTab("status")
-	fetchAndRedraw()
+	if fetchAndRedraw then
+		fetchAndRedraw()
+	end
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
@@ -837,7 +854,7 @@ end)
 
 task.spawn(function()
 	while task.wait(REFRESH_SECONDS) do
-		if panel.Visible then
+		if panel.Visible and fetchAndRedraw then
 			fetchAndRedraw()
 		end
 	end
