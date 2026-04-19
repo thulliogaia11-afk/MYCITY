@@ -64,10 +64,10 @@ end
 
 -- Source of truth for ownership is PlayerDataService.Data.HouseLevel (1–4).
 local function getHouseLevel(player: Player): number
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return 1
 	end
+	local data = PlayerDataService.GetData(player)
 	local lvl = data.HouseLevel
 	if typeof(lvl) ~= "number" or lvl < 1 or lvl > 4 then
 		return 1
@@ -104,10 +104,10 @@ function HouseService.CanAfford(player: Player, level: number): boolean
 		return false
 	end
 
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false
 	end
+	local data = PlayerDataService.GetData(player)
 
 	if data.HouseLevel >= level then
 		return false
@@ -123,11 +123,11 @@ function HouseService.BuyHouse(player: Player, level: number): boolean
 		return false
 	end
 
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		print(string.format("[%s] BuyHouse: no data for %s", GAME_LABEL, player.Name))
 		return false
 	end
+	local data = PlayerDataService.GetData(player)
 
 	if data.HouseLevel >= level then
 		print(string.format("[%s] BuyHouse: %s already owns tier %d or better", GAME_LABEL, player.Name, level))
@@ -199,10 +199,10 @@ function HouseService.BuyHouse(player: Player, level: number): boolean
 end
 
 local function grantStarterHouseIfNeeded(player: Player)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 
 	if data.HouseLevel ~= 0 then
 		return
@@ -229,10 +229,10 @@ local function passiveIncomeLoop()
 		task.wait(PASSIVE_INTERVAL)
 
 		for _, player in Players:GetPlayers() do
-			local data = PlayerDataService.GetData(player)
-			if not data then
+			if not PlayerDataService.HasSession(player) then
 				continue
 			end
+			local data = PlayerDataService.GetData(player)
 
 			-- Shared Room (level 1) / unstored edge: no passive payout.
 			if data.HouseLevel <= 1 then

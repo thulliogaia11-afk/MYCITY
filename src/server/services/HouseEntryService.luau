@@ -261,7 +261,7 @@ end
 --[[
 	Safe teleport: briefly zero movement, CFrame to target, restore humanoid stats.
 ]]
-local function safeTeleportPlayer(player: Player, targetPosition: Vector3, logLabel: string): boolean
+local function safeTeleportPlayer(player: Player, target: Vector3 | CFrame, logLabel: string): boolean
 	local character = player.Character
 	if not character then
 		warn(string.format("[%s] HouseEntryService: no character for %s", GAME_LABEL, player.Name))
@@ -287,9 +287,12 @@ local function safeTeleportPlayer(player: Player, targetPosition: Vector3, logLa
 
 	task.wait(0.1)
 
+	local targetCFrame = if typeof(target) == "CFrame" then target else CFrame.new(target)
+	local targetPosition = targetCFrame.Position
+
 	hrp.AssemblyLinearVelocity = Vector3.zero
 	hrp.AssemblyAngularVelocity = Vector3.zero
-	hrp.CFrame = CFrame.new(targetPosition)
+	hrp.CFrame = targetCFrame
 
 	task.wait(0.2)
 
@@ -308,6 +311,29 @@ end
 
 local function getExteriorTeleportPosition(center: Vector3, size: Vector3): Vector3
 	return Vector3.new(center.X, 3, center.Z - (size.Z / 2 + 8))
+end
+
+local function getHouseExitCFrame(houseModel: Model): (CFrame, string)
+	local frontExitPoint = houseModel:FindFirstChild("FrontExitPoint", true)
+	if frontExitPoint and frontExitPoint:IsA("BasePart") then
+		return frontExitPoint.CFrame, "FrontExitPoint"
+	end
+
+	local exitPoint = houseModel:FindFirstChild("ExitPoint", true)
+	if exitPoint and exitPoint:IsA("BasePart") then
+		return exitPoint.CFrame, "ExitPoint"
+	end
+
+	local door = houseModel:FindFirstChild("Door", true)
+	if door and door:IsA("BasePart") then
+		local forward = door.CFrame.LookVector
+		local exitPos = door.Position + (forward * 6) + Vector3.new(0, 1.5, 0)
+		local exitLookAt = exitPos + forward
+		return CFrame.lookAt(exitPos, exitLookAt), "Door"
+	end
+
+	local center, size = getHouseBounds(houseModel)
+	return CFrame.new(getExteriorTeleportPosition(center, size)), "BoundsFallback"
 end
 
 --[[
@@ -421,10 +447,10 @@ function HouseEntryService.CanEnterHouse(player: Player, houseLevel: number): bo
 	if houseLevel < 1 or houseLevel > 4 then
 		return false
 	end
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false
 	end
+	local data = PlayerDataService.GetData(player)
 	local pl = data.HouseLevel
 	if typeof(pl) ~= "number" then
 		return false
@@ -453,10 +479,10 @@ end
 	After server restart, attributes are not persisted — re-apply OwnerId + beacon from saved HouseId.
 ]]
 function HouseEntryService.RestoreOwnership(player: Player)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 	local houseId = data.HouseId
 	if typeof(houseId) ~= "string" or houseId == "" then
 		return
@@ -516,6 +542,7 @@ function HouseEntryService.AssignHouse(player: Player, houseLevel: number): stri
 						warn(string.format("[%s] HouseEntryService.AssignHouse: failed to save HouseId for %s", GAME_LABEL, player.Name))
 						return ""
 					end
+					PlayerDataService.RequestImmediateSave(player, "house assignment")
 					createOwnerBeacon(d)
 					printLog(
 						string.format(
@@ -546,10 +573,10 @@ end
 	Clear workspace claim and player HouseId (does not change HouseLevel).
 ]]
 function HouseEntryService.ReleaseHouse(player: Player)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 	local hid = data.HouseId
 	if typeof(hid) ~= "string" or hid == "" then
 		return
@@ -566,6 +593,8 @@ function HouseEntryService.ReleaseHouse(player: Player)
 
 	if not PlayerDataService.SetData(player, "HouseId", "") then
 		warn(string.format("[%s] HouseEntryService.ReleaseHouse: failed to clear HouseId for %s", GAME_LABEL, player.Name))
+	else
+		PlayerDataService.RequestImmediateSave(player, "house release")
 	end
 	printLog(string.format("HouseEntryService.ReleaseHouse: %s released house slot", player.Name))
 end
@@ -578,10 +607,10 @@ function HouseEntryService.EnterHouseAtModel(player: Player, houseModel: Model):
 		return false, "You are already inside a home."
 	end
 
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false, "Data not loaded yet."
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local mapHouseId = houseModel:GetAttribute("HouseId")
 	if typeof(mapHouseId) ~= "string" or mapHouseId == "" then
@@ -647,15 +676,23 @@ function HouseEntryService.ExitHouseAtModel(player: Player, houseModel: Model): 
 		return false, "Wrong house exit."
 	end
 
-	local center, size = getHouseBounds(houseModel)
-	local exteriorPos = getExteriorTeleportPosition(center, size)
+	local exitCFrame, exitSource = getHouseExitCFrame(houseModel)
 
-	if not safeTeleportPlayer(player, exteriorPos, string.format("exit house %s", mapHouseId)) then
+	if not safeTeleportPlayer(player, exitCFrame, string.format("exit house %s", mapHouseId)) then
 		return false, "Teleport failed."
 	end
 
 	cleanupInsideSession(player)
-	printLog(string.format("HouseEntryService: %s exited %s", player.Name, mapHouseId))
+	local exitPosition = exitCFrame.Position
+	printLog(string.format(
+		"HouseExit: %s exited %s via %s to %.2f,%.2f,%.2f",
+		player.Name,
+		mapHouseId,
+		exitSource,
+		exitPosition.X,
+		exitPosition.Y,
+		exitPosition.Z
+	))
 	return true
 end
 
@@ -666,10 +703,10 @@ function HouseEntryService.EnterHouse(player: Player): (boolean, string?)
 	if HouseEntryService.IsInsideHouse(player) then
 		return false, "You are already inside a home."
 	end
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false, "Data not loaded yet."
 	end
+	local data = PlayerDataService.GetData(player)
 	local hid = typeof(data.HouseId) == "string" and data.HouseId or ""
 	if hid == "" then
 		fireNotification(player, "You don't own a house yet. Buy one in the Housing menu!", "error")

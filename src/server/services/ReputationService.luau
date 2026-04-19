@@ -47,19 +47,20 @@ local function tierFromScore(score: number): string
 end
 
 local function syncLastTierFromData(player: Player)
-	local data = PlayerDataService.GetData(player)
-	if data then
-		lastKnownTier[player] = tierFromScore(data.Reputation)
+	if not PlayerDataService.HasSession(player) then
+		return
 	end
+	local data = PlayerDataService.GetData(player)
+	lastKnownTier[player] = tierFromScore(data.Reputation)
 end
 
 local ReputationService = {}
 
 function ReputationService.GetReputation(player: Player): number
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return 0
 	end
+	local data = PlayerDataService.GetData(player)
 	return data.Reputation
 end
 
@@ -69,10 +70,10 @@ end
 
 -- If the player’s tier increased since lastKnownTier, print congratulations and refresh cache.
 function ReputationService.CheckTierUp(player: Player)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local newTier = tierFromScore(data.Reputation)
 	local previous = lastKnownTier[player]
@@ -103,11 +104,11 @@ function ReputationService.AddReputation(player: Player, amount: number, reason:
 		return
 	end
 
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		print(string.format("[%s] AddReputation failed: no data for %s (%s)", GAME_LABEL, player.Name, reason))
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local gain = amount
 	if data.City == "Solara" then
@@ -174,11 +175,11 @@ function ReputationService.RemoveReputation(player: Player, amount: number, reas
 		return
 	end
 
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		print(string.format("[%s] RemoveReputation failed: no data for %s (%s)", GAME_LABEL, player.Name, reason))
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local newRep = math.max(0, data.Reputation - amount)
 	if not PlayerDataService.SetData(player, "Reputation", newRep) then

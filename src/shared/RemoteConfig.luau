@@ -20,6 +20,7 @@ return {
 	StartWork = folder:WaitForChild("StartWork", 10),
 	StopWork = folder:WaitForChild("StopWork", 10),
 	GetMissionProgress = folder:WaitForChild("GetMissionProgress", 10),
+	ClaimStarterSliceMission = folder:WaitForChild("ClaimStarterSliceMission", 10),
 	LeaveReview = folder:WaitForChild("LeaveReview", 10),
 	GetReviews = folder:WaitForChild("GetReviews", 10),
 	SubmitPlayerReview = folder:WaitForChild("SubmitPlayerReview", 10),

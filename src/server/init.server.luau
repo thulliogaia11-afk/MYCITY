@@ -34,6 +34,7 @@ local GetAvailableJobs = makeFunction("GetAvailableJobs")
 local StartWork = makeFunction("StartWork")
 local StopWork = makeFunction("StopWork")
 local GetMissionProgress = makeFunction("GetMissionProgress")
+local ClaimStarterSliceMission = makeFunction("ClaimStarterSliceMission")
 local LeaveReview = makeFunction("LeaveReview")
 local GetReviews = makeFunction("GetReviews")
 local SubmitPlayerReview = makeFunction("SubmitPlayerReview")
@@ -154,7 +155,23 @@ StopWork.OnServerInvoke = function(player)
 end
 
 GetMissionProgress.OnServerInvoke = function(player)
-	return JobService.GetMissionProgress(player)
+	local result = JobService.GetMissionProgress(player)
+	if typeof(result) ~= "table" then
+		return result
+	end
+	if result.success ~= true or typeof(result.data) ~= "table" then
+		return result
+	end
+	result.data.starterSlice = MissionService.GetStarterSliceView(player)
+	return result
+end
+
+ClaimStarterSliceMission.OnServerInvoke = function(player)
+	local success = MissionService.MarkStarterSliceMissionClaimed(player)
+	return {
+		success = success,
+		data = MissionService.GetStarterSliceView(player),
+	}
 end
 
 LeaveReview.OnServerInvoke = function(player, targetUserId, stars, comment)

@@ -208,10 +208,10 @@ local function countTableKeys(t: { [any]: any }): number
 end
 
 local function playerLivesInCity(player: Player, cityName: string): boolean
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false
 	end
+	local data = PlayerDataService.GetData(player)
 	return typeof(data.City) == "string" and data.City == cityName
 end
 
@@ -492,23 +492,29 @@ end
 
 -- ——— Mayor title / job sync ———
 
-local function stripMayorFromPlayer(userId: number, cityName: string)
+local function stripMayorFromPlayer(userId: number, cityName: string): boolean
 	local plr = Players:GetPlayerByUserId(userId)
 	if not plr then
-		return
+		return false
+	end
+	if not PlayerDataService.HasSession(plr) then
+		return false
 	end
 	local data = PlayerDataService.GetData(plr)
-	if not data then
-		return
-	end
 	local expected = mayorJobForCity(cityName)
+	local removed = false
 	if data.Job == expected then
 		PlayerDataService.SetData(plr, "Job", "Unemployed")
+		removed = true
 	end
 	if typeof(data.MayorTitle) == "string" and #data.MayorTitle > 0 then
 		PlayerDataService.SetData(plr, "MayorTitle", "")
+		removed = true
 	end
-	printTag(string.format("ElectionService: removed mayor role from %s (%d) for %s", plr.Name, userId, cityName))
+	if removed then
+		printTag(string.format("ElectionService: removed mayor role from %s (%d) for %s", plr.Name, userId, cityName))
+	end
+	return removed
 end
 
 local function grantMayorRoleAndBonus(userId: number, cityName: string, reason: string)
@@ -1351,13 +1357,21 @@ local function start()
 	CityService.OnCityAssignmentChanged(function(player: Player, oldCity: string?, _newCity: string)
 		if oldCity and isValidCity(oldCity) then
 			local st = electionByCity[oldCity]
+			local vacatedSeat = false
 			if st and st.currentMayor == player.UserId then
 				st.currentMayor = nil
 				st.currentMayorName = NO_MAYOR_LABEL
 				saveCityElectionState(oldCity)
-				printTag(string.format("ElectionService: %s vacated Mayor seat in %s (moved city)", player.Name, oldCity))
+				vacatedSeat = true
 			end
-			stripMayorFromPlayer(player.UserId, oldCity)
+			local removedMayorRole = stripMayorFromPlayer(player.UserId, oldCity)
+			if vacatedSeat then
+				printTag(string.format("ElectionService: %s vacated Mayor seat in %s (moved city)", player.Name, oldCity))
+			elseif removedMayorRole then
+				printTag(string.format("ElectionService: cleared stale mayor state for %s in %s after city change", player.Name, oldCity))
+			else
+				printTag(string.format("ElectionService: no mayor cleanup needed for %s in %s after city change", player.Name, oldCity))
+			end
 		end
 	end)
 

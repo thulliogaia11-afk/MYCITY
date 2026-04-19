@@ -263,13 +263,17 @@ local function resetMissionEntryAtMidnight(e: { [string]: any })
 	end
 end
 
-local function canApplyForJob(player: Player, jobName: string): (boolean, string?)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+local function canApplyForJob(player: Player, jobName: string, data: { [string]: any }?): (boolean, string?)
+	local pdata: { [string]: any }
+	if data then
+		pdata = data
+	elseif PlayerDataService.HasSession(player) then
+		pdata = PlayerDataService.GetData(player)
+	else
 		return false, "Data not loaded."
 	end
-	local dismissedFrom = typeof(data.DismissedFrom) == "string" and data.DismissedFrom or ""
-	local dismissalTime = typeof(data.DismissalTime) == "number" and data.DismissalTime or 0
+	local dismissedFrom = typeof(pdata.DismissedFrom) == "string" and pdata.DismissedFrom or ""
+	local dismissalTime = typeof(pdata.DismissalTime) == "number" and pdata.DismissalTime or 0
 	if dismissedFrom == "" or dismissalTime == 0 then
 		return true
 	end
@@ -289,16 +293,16 @@ local function canApplyForJob(player: Player, jobName: string): (boolean, string
 	return true
 end
 
-local function playerQualifiesForJob(player: Player, jobName: string): boolean
+local function playerQualifiesForJob(player: Player, jobName: string, cachedData: { [string]: any }?): boolean
 	local job = JOBS[jobName]
 	if not job then
 		return false
 	end
 
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not cachedData and not PlayerDataService.HasSession(player) then
 		return false
 	end
+	local data = cachedData or PlayerDataService.GetData(player)
 
 	if data.Reputation < job.RequiredReputation then
 		return false
@@ -308,17 +312,17 @@ local function playerQualifiesForJob(player: Player, jobName: string): boolean
 		return false
 	end
 
-	local okApply, _ = canApplyForJob(player, jobName)
+	local okApply, _ = canApplyForJob(player, jobName, data)
 	return okApply
 end
 
 -- Ironholm + Factory Worker / Solara + Tour Guide / Ironholm city jobs: +20% pay where configured.
 local function computePayout(player: Player, jobName: string, job: JobDefinition): number
 	local pay = job.BasePay
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return math.floor(pay + 0.5)
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local city = data.City
 	if city == "Ironholm" and jobName == "Factory Worker" then
@@ -353,11 +357,11 @@ local function runWorkLoop(player: Player, jobName: string)
 			break
 		end
 
-		local data = PlayerDataService.GetData(player)
-		if not data then
+		if not PlayerDataService.HasSession(player) then
 			workSessions[player] = nil
 			break
 		end
+		local data = PlayerDataService.GetData(player)
 
 		local earned = computePayout(player, jobName, job)
 		local newMoney = data.Money + earned
@@ -396,9 +400,13 @@ function JobService.GetJobs(): { JobDefinition }
 end
 
 function JobService.GetAvailableJobs(player: Player): { JobDefinition }
+	local data = PlayerDataService.GetData(player)
+	if not PlayerDataService.HasSession(player) then
+		return {}
+	end
 	local available: { JobDefinition } = {}
 	for _, name in JOB_ORDER do
-		if playerQualifiesForJob(player, name) then
+		if playerQualifiesForJob(player, name, data) then
 			table.insert(available, table.clone(JOBS[name]))
 		end
 	end
@@ -413,10 +421,10 @@ function JobService.CanApplyForJob(player: Player, jobName: string): (boolean, s
 	if not jobExists(jobName) then
 		return false, "Unknown job."
 	end
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false, "Data not loaded."
 	end
+	local data = PlayerDataService.GetData(player)
 	if data.Reputation < (JOBS[jobName].RequiredReputation or 0) then
 		return false, "Not enough reputation."
 	end
@@ -424,7 +432,7 @@ function JobService.CanApplyForJob(player: Player, jobName: string): (boolean, s
 	if job.City ~= "Any" and data.City ~= job.City then
 		return false, "Wrong city for this job."
 	end
-	return canApplyForJob(player, jobName)
+	return canApplyForJob(player, jobName, data)
 end
 
 function JobService.StartWork(player: Player, jobName: string): boolean
@@ -513,10 +521,10 @@ function JobService.StopWork(player: Player)
 end
 
 function JobService.DismissPlayer(player: Player, jobName: string?)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 	local currentTitle = typeof(data.Job) == "string" and data.Job or ""
 	if isMayorJob(currentTitle) then
 		return
@@ -551,10 +559,10 @@ function JobService.DismissPlayer(player: Player, jobName: string?)
 end
 
 function JobService.CheckMissionStreak(player: Player)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 	local jobTitle = typeof(data.Job) == "string" and data.Job or "Unemployed"
 	if jobTitle == "Unemployed" or isMayorJob(jobTitle) then
 		return
@@ -608,10 +616,10 @@ function JobService.CompleteMission(player: Player, jobName: string): { success:
 	if not jobDef or not jobDef.DailyMission then
 		return { success = false, message = "No daily mission for this job." }
 	end
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return { success = false, message = "Data not loaded." }
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local active = workSessions[player] and workSessions[player].jobName or nil
 	local storedJob = typeof(data.Job) == "string" and data.Job or "Unemployed"
@@ -661,10 +669,10 @@ function JobService.CompleteMission(player: Player, jobName: string): { success:
 end
 
 function JobService.GetMissionProgress(player: Player): { success: boolean, message: string?, data: any? }
-	local d = PlayerDataService.GetData(player)
-	if not d then
+	if not PlayerDataService.HasSession(player) then
 		return { success = false, message = "Data not loaded." }
 	end
+	local d = PlayerDataService.GetData(player)
 	local jobTitle = typeof(d.Job) == "string" and d.Job or "Unemployed"
 	local mp = cloneMissionProgress(d.MissionProgress)
 	local payload: { [string]: any } = {
@@ -733,10 +741,10 @@ function JobService.LeaveReview(
 		return { success = false, message = "Cannot review yourself." }
 	end
 
-	local rData = PlayerDataService.GetData(reviewerPlayer)
-	if not rData then
+	if not PlayerDataService.HasSession(reviewerPlayer) then
 		return { success = false, message = "Data not loaded." }
 	end
+	local rData = PlayerDataService.GetData(reviewerPlayer)
 	local rCity = typeof(rData.City) == "string" and rData.City or "None"
 	if rCity == "None" then
 		return { success = false, message = "Join a city to leave reviews." }
@@ -746,10 +754,10 @@ function JobService.LeaveReview(
 	if not targetPlayer then
 		return { success = false, message = "Target player must be online." }
 	end
-	local tData = PlayerDataService.GetData(targetPlayer)
-	if not tData then
+	if not PlayerDataService.HasSession(targetPlayer) then
 		return { success = false, message = "Target data not loaded." }
 	end
+	local tData = PlayerDataService.GetData(targetPlayer)
 	local tCity = typeof(tData.City) == "string" and tData.City or "None"
 	if tCity ~= rCity then
 		return { success = false, message = "You can only review players in your city." }
@@ -802,10 +810,10 @@ function JobService.GetReviews(_player: Player, targetUserId: number): { success
 	end
 	local targetPlayer = Players:GetPlayerByUserId(targetUserId)
 	if targetPlayer then
-		local tData = PlayerDataService.GetData(targetPlayer)
-		if not tData then
+		if not PlayerDataService.HasSession(targetPlayer) then
 			return { success = false, reviews = {}, averageRating = 0, message = "No data." }
 		end
+		local tData = PlayerDataService.GetData(targetPlayer)
 		local rev = if typeof(tData.Reviews) == "table" then tData.Reviews :: { any } else {}
 		local lastN: { any } = {}
 		local start = math.max(1, #rev - 9)
@@ -836,7 +844,7 @@ function JobService.GetReviews(_player: Player, targetUserId: number): { success
 	return { success = true, reviews = lastN, averageRating = avg }
 end
 
-local function onPlayerRemoving(player: Player)
+local function onBeforeSaveLeave(player: Player)
 	JobService.StopWork(player)
 end
 
@@ -869,7 +877,7 @@ end
 
 local function start()
 	validateJobCities()
-	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	PlayerDataService.RegisterBeforeSaveHook("JobService", 20, onBeforeSaveLeave)
 
 	PlayerDataService.OnDataLoaded(function(player: Player)
 		task.defer(function()

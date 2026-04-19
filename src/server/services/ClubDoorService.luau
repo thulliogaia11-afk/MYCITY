@@ -4,7 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GAME_LABEL = "MY CITY"
 
 local ClubService = require(script.Parent:WaitForChild("ClubService") :: ModuleScript)
-local PlayerDataService = require(script.Parent:WaitForChild("PlayerDataService") :: ModuleScript)
+local ReputationService = require(script.Parent:WaitForChild("ReputationService") :: ModuleScript)
 local RemoteConfig = require(
 	ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RemoteConfig") :: ModuleScript
 )
@@ -16,14 +16,6 @@ local CLUB_NAMES = {
 	"Club_Silver",
 	"Club_Gold",
 	"Club_Diamond",
-}
-
--- Fixed world positions outside each club (manual ExitDoor interiors; teleport here on exit).
-local CLUB_EXIT_WORLD_POSITIONS: { [string]: Vector3 } = {
-	Club_Bronze = Vector3.new(160, 3, 341),
-	Club_Silver = Vector3.new(208, 3, 339),
-	Club_Gold = Vector3.new(252, 3, 343),
-	Club_Diamond = Vector3.new(300, 3, 349),
 }
 
 local CLUB_MODEL_FIND_TIMEOUT = 10
@@ -58,12 +50,7 @@ local function getDeniedMessage(player: Player, clubName: string): string
 	end
 
 	local requiredRep = info.MinimumReputation or 0
-	local currentRep = 0
-
-	local playerData = PlayerDataService.GetData(player)
-	if playerData and playerData.Reputation then
-		currentRep = playerData.Reputation
-	end
+	local currentRep = ReputationService.GetReputation(player)
 
 	local missing = math.max(0, requiredRep - currentRep)
 
@@ -114,12 +101,31 @@ end
 --[[
 	Single ENTRY prompt only. Never touch ExitPrompt (nightclub exit is separate).
 ]]
+local function isDrinkPrompt(prompt: ProximityPrompt): boolean
+	local parent = prompt.Parent
+	return prompt.Name == "DrinkPrompt"
+		or prompt:GetAttribute("MY_CITY_DrinkPrompt") == true
+		or (parent ~= nil and parent.Name == "DrinkPromptAttachment")
+end
+
+local function shouldPreserveNonEntryPrompt(prompt: ProximityPrompt): boolean
+	return isDrinkPrompt(prompt) or prompt:GetAttribute("MY_CITY_IgnorePromptDedupe") == true
+end
+
 local function dedupeEntryProximityPrompts(clubModel: Model)
 	local prompts: { ProximityPrompt } = {}
+	local preservedDrinkPrompt = false
 	for _, d in clubModel:GetDescendants() do
 		if d:IsA("ProximityPrompt") and d.Name ~= "ExitPrompt" then
-			table.insert(prompts, d)
+			if shouldPreserveNonEntryPrompt(d) then
+				preservedDrinkPrompt = true
+			else
+				table.insert(prompts, d)
+			end
 		end
+	end
+	if preservedDrinkPrompt then
+		print(string.format("[%s] ClubDoorService preserved drink prompt for %s", GAME_LABEL, clubModel.Name))
 	end
 	if #prompts == 0 then
 		return
@@ -211,7 +217,29 @@ local function getSafeTeleportPosition(clubModel: Model): Vector3?
 	return nil
 end
 
-local function safeTeleportPlayerToWorld(player: Player, targetPosition: Vector3, logLabel: string): boolean
+local function getClubExitCFrame(clubModel: Model): (CFrame, string)
+	local frontExitPoint = clubModel:FindFirstChild("FrontExitPoint", true)
+	if frontExitPoint and frontExitPoint:IsA("BasePart") then
+		return frontExitPoint.CFrame, "FrontExitPoint"
+	end
+
+	local exitPoint = clubModel:FindFirstChild("ExitPoint", true)
+	if exitPoint and exitPoint:IsA("BasePart") then
+		return exitPoint.CFrame, "ExitPoint"
+	end
+
+	local entranceDoor = clubModel:FindFirstChild("EntranceDoor", true)
+	if entranceDoor and entranceDoor:IsA("BasePart") then
+		local forward = entranceDoor.CFrame.LookVector
+		local exitPos = entranceDoor.Position + (forward * 8) + Vector3.new(0, 1.5, 0)
+		local exitLookAt = exitPos + forward
+		return CFrame.lookAt(exitPos, exitLookAt), "EntranceDoor"
+	end
+
+	error(string.format("[%s] ClubDoorService: no exit reference found in %s", GAME_LABEL, clubModel.Name))
+end
+
+local function safeTeleportPlayerToWorld(player: Player, target: Vector3 | CFrame, logLabel: string): boolean
 	local character = player.Character
 	if not character then
 		warn(string.format("[%s] ClubDoorService: no character for %s", GAME_LABEL, player.Name))
@@ -237,10 +265,13 @@ local function safeTeleportPlayerToWorld(player: Player, targetPosition: Vector3
 
 	task.wait(0.1)
 
+	local targetCFrame = if typeof(target) == "CFrame" then target else CFrame.new(target)
+	local targetPosition = targetCFrame.Position
+
 	hrp.AssemblyLinearVelocity = Vector3.zero
 	hrp.AssemblyAngularVelocity = Vector3.zero
 
-	hrp.CFrame = CFrame.new(targetPosition)
+	hrp.CFrame = targetCFrame
 
 	task.wait(0.2)
 
@@ -291,14 +322,10 @@ local function handlePromptTriggered(player: Player, clubName: string, clubModel
 		return
 	end
 
-	local info = ClubService.GetClubInfo(clubName)
 	local okTeleport = safeTeleportIntoClub(player, clubModel)
 
 	if okTeleport then
-		local welcomeMessage = "Bem-vindo!"
-		if info and info.Description then
-			welcomeMessage = info.Description
-		end
+		local welcomeMessage = ClubService.GetWelcomeMessage(clubName) or "Bem-vindo!"
 
 		fireNotification(player, welcomeMessage, "success")
 		print(string.format("[%s] ClubDoorService: %s entered %s", GAME_LABEL, player.Name, clubName))
@@ -358,14 +385,24 @@ local function wireClub(clubName: string)
 		end
 		if exitPrompt and exitPrompt:IsA("ProximityPrompt") then
 			exitPrompt.Triggered:Connect(function(player: Player)
-				local pos = CLUB_EXIT_WORLD_POSITIONS[clubName]
-				if pos then
-					if safeTeleportPlayerToWorld(player, pos, "nightclub exit — " .. clubName) then
+				local okExit, exitCFrame, exitSource = pcall(getClubExitCFrame, clubModel)
+				if okExit then
+					if safeTeleportPlayerToWorld(player, exitCFrame, "nightclub exit — " .. clubName) then
 						fireNotification(player, "You left the nightclub.", "success")
-						print("[MY CITY] Player exited club:", clubName)
+						local exitPosition = exitCFrame.Position
+						print(string.format(
+							"[%s] ClubExit: %s exited %s via %s to %.2f,%.2f,%.2f",
+							GAME_LABEL,
+							player.Name,
+							clubName,
+							exitSource,
+							exitPosition.X,
+							exitPosition.Y,
+							exitPosition.Z
+						))
 					end
 				else
-					warn(string.format("[%s] ClubDoorService: no fixed exit position for %s", GAME_LABEL, clubName))
+					warn(string.format("[%s] ClubDoorService: %s", GAME_LABEL, tostring(exitCFrame)))
 					fireNotification(player, "Could not leave the club (missing exit data).", "error")
 				end
 			end)
@@ -395,3 +432,4 @@ end
 ClubDoorService.Start()
 
 return ClubDoorService
+

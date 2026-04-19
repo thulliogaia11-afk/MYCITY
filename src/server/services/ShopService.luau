@@ -41,7 +41,7 @@ local function logPurchase(player: Player, itemName: string, shopName: string, c
 	print(string.format("[%s] %s bought %s at %s shop for %d CC", GAME_LABEL, player.Name, itemName, shopName, costCC))
 end
 
-local function getData(player: Player): { [string]: any }?
+local function getData(player: Player): { [string]: any }
 	return PlayerDataService.GetData(player)
 end
 
@@ -49,10 +49,10 @@ local function spendMoney(player: Player, amount: number): boolean
 	if amount <= 0 then
 		return false
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false
 	end
+	local data = getData(player)
 	local money = data.Money
 	if typeof(money) ~= "number" or money < amount then
 		return false
@@ -64,10 +64,10 @@ local function addMoney(player: Player, amount: number): boolean
 	if amount < 0 then
 		return false
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return false
 	end
+	local data = getData(player)
 	local money = typeof(data.Money) == "number" and data.Money or 0
 	return PlayerDataService.SetData(player, "Money", money + amount)
 end
@@ -155,10 +155,10 @@ end
 -- ——— BANK ———
 
 function ShopService.GetBankBalance(player: Player): ShopResult
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = PlayerDataService.GetData(player)
 	local bankBal = typeof(data.BankBalance) == "number" and math.floor(data.BankBalance) or 0
 	return ok(string.format("Bank balance: %d CC", bankBal))
 end
@@ -167,10 +167,10 @@ function ShopService.DepositMoney(player: Player, amount: number): ShopResult
 	if typeof(amount) ~= "number" or amount <= 0 or amount ~= math.floor(amount) then
 		return fail("Invalid amount.")
 	end
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = PlayerDataService.GetData(player)
 
 	print("[MY CITY] ShopService.DepositMoney:", player.Name, "amount:", amount)
 
@@ -203,10 +203,10 @@ function ShopService.WithdrawMoney(player: Player, amount: number): ShopResult
 	if typeof(amount) ~= "number" or amount <= 0 or amount ~= math.floor(amount) then
 		return fail("Invalid amount.")
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = getData(player)
 	local bank = typeof(data.BankBalance) == "number" and data.BankBalance or 0
 	if bank < amount then
 		return fail("Not enough CC in bank.")
@@ -254,10 +254,10 @@ function ShopService.Invest(player: Player, amount: number): ShopResult
 	if typeof(amount) ~= "number" or amount <= 0 or amount ~= math.floor(amount) then
 		return fail("Invalid amount.")
 	end
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = PlayerDataService.GetData(player)
 	local wallet = typeof(data.Money) == "number" and math.floor(data.Money) or 0
 	if wallet < amount then
 		return fail("Not enough CC to invest.")
@@ -293,8 +293,11 @@ function ShopService.Invest(player: Player, amount: number): ShopResult
 end
 
 function ShopService.GetInvestments(player: Player): { InvestmentRow }
+	if not PlayerDataService.HasSession(player) then
+		return {}
+	end
 	local data = PlayerDataService.GetData(player)
-	if not data or typeof(data.Investments) ~= "table" then
+	if typeof(data.Investments) ~= "table" then
 		return {}
 	end
 	local out: { InvestmentRow } = {}
@@ -321,8 +324,11 @@ function ShopService.GetInvestments(player: Player): { InvestmentRow }
 end
 
 function ShopService.ProcessInvestmentsForPlayer(player: Player)
+	if not PlayerDataService.HasSession(player) then
+		return
+	end
 	local data = PlayerDataService.GetData(player)
-	if not data or typeof(data.Investments) ~= "table" then
+	if typeof(data.Investments) ~= "table" then
 		return
 	end
 
@@ -819,10 +825,10 @@ function ShopService.RestoreAllAccessories(player: Player)
 	if not character then
 		return
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = getData(player)
 
 	for _, name in ACCESSORY_PART_ORDER do
 		stripAccessoryParts(character, name)
@@ -847,8 +853,11 @@ function ShopService.RestoreAllAccessories(player: Player)
 end
 
 function ShopService.ApplyAccessory(player: Player, accessoryName: string)
+	if not PlayerDataService.HasSession(player) then
+		return
+	end
 	local data = getData(player)
-	if not data or not accessoryOwnedForVisual(data, accessoryName) then
+	if not accessoryOwnedForVisual(data, accessoryName) then
 		return
 	end
 	if not ACCESSORY_PARTS[accessoryName] then
@@ -866,10 +875,10 @@ function ShopService.RemoveAccessory(player: Player, accessoryName: string)
 end
 
 function ShopService.GetOwnedOutfits(player: Player): WardrobeSnapshot
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return { outfits = {}, accessories = accessorySnapshotFromData({}) }
 	end
+	local data = getData(player)
 	return {
 		outfits = getOwnedOutfitsList(data),
 		accessories = accessorySnapshotFromData(data),
@@ -884,10 +893,10 @@ function ShopService.BuyAccessory(player: Player, accessoryName: string): ShopRe
 	if not cost then
 		return fail("Unknown accessory.")
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = getData(player)
 	local anyData = data :: any
 
 	if ACCESSORY_BOOL_KEYS[accessoryName] then
@@ -956,10 +965,10 @@ function ShopService.EquipOutfit(player: Player, outfitName: string): ShopResult
 	if typeof(outfitName) ~= "string" or outfitName == "" then
 		return fail("Invalid outfit.")
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = getData(player)
 
 	if outfitName ~= "Default" then
 		local hasOutfit = false
@@ -1004,10 +1013,10 @@ function ShopService.RestoreOutfit(player: Player)
 	if JobService.IsWorking(player) then
 		return
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return
 	end
+	local data = getData(player)
 	if not player.Character then
 		return
 	end
@@ -1030,10 +1039,10 @@ function ShopService.BuyOutfit(player: Player, outfitName: string): ShopResult
 	if not colors or not price then
 		return fail("Unknown outfit.")
 	end
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = getData(player)
 	if playerOwnsOutfit(data, outfitName) then
 		return fail("You already own this outfit.")
 	end
@@ -1118,10 +1127,10 @@ end
 -- ——— ELECTRONICS ———
 
 function ShopService.BuyPhone(player: Player): ShopResult
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = getData(player)
 	if data.Phone == true then
 		return fail("You already own a phone.")
 	end
@@ -1137,10 +1146,10 @@ function ShopService.BuyPhone(player: Player): ShopResult
 end
 
 function ShopService.BuyWatch(player: Player): ShopResult
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = getData(player)
 	if data.Watch == true then
 		return fail("You already own a watch.")
 	end
@@ -1159,10 +1168,10 @@ function ShopService.BuyWatch(player: Player): ShopResult
 end
 
 function ShopService.BuyLaptop(player: Player): ShopResult
-	local data = getData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		return fail("Data not loaded.")
 	end
+	local data = getData(player)
 	if data.Laptop == true then
 		return fail("You already own a laptop.")
 	end

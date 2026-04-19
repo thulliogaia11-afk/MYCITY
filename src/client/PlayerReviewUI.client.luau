@@ -16,6 +16,7 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local Remotes = require(game.ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RemoteConfig"))
 
 local LOG_PREFIX = "[CLIENT][PlayerReview]"
+local DEBUG_REVIEW_FLOW = true
 
 -- Max distance (studs) from local character to target to open or submit a review.
 local MAX_REVIEW_DISTANCE_STUDS = 18
@@ -26,6 +27,31 @@ local PENDING_CONFIRM_SECONDS = 2.75
 local function log(fmt: string, ...: any)
 	print(string.format(LOG_PREFIX .. " " .. fmt, ...))
 end
+
+local debugLogLastAt: { [string]: number } = {}
+
+local function debugLog(fmt: string, ...: any)
+	if not DEBUG_REVIEW_FLOW then
+		return
+	end
+	log(fmt, ...)
+end
+
+local function debugLogRateLimited(key: string, intervalSeconds: number, fmt: string, ...: any)
+	if not DEBUG_REVIEW_FLOW then
+		return
+	end
+	local nowClock = os.clock()
+	local lastAt = debugLogLastAt[key] or 0
+	if nowClock - lastAt < intervalSeconds then
+		return
+	end
+	debugLogLastAt[key] = nowClock
+	log(fmt, ...)
+end
+
+local guiObjectsAtPositionWarnedAt = 0
+local GUI_LOOKUP_WARN_INTERVAL = 5
 
 -- ——— Theme ———
 local NAVY = Color3.fromHex("16213e")
@@ -76,8 +102,8 @@ screenGui.Parent = PlayerGui
 local root = Instance.new("Frame")
 root.Name = "Panel"
 root.AnchorPoint = Vector2.new(1, 1)
-root.Position = UDim2.new(1, -20, 1, -88)
-root.Size = UDim2.fromOffset(320, 592)
+root.Position = UDim2.new(1, -24, 1, -132)
+root.Size = UDim2.fromOffset(296, 500)
 root.BackgroundColor3 = NAVY
 root.BorderSizePixel = 0
 root.Visible = false
@@ -95,54 +121,69 @@ rootStroke.Transparency = 0.5
 rootStroke.Parent = root
 
 local pad = Instance.new("UIPadding")
-pad.PaddingTop = UDim.new(0, 12)
-pad.PaddingBottom = UDim.new(0, 12)
-pad.PaddingLeft = UDim.new(0, 14)
-pad.PaddingRight = UDim.new(0, 14)
+pad.PaddingTop = UDim.new(0, 10)
+pad.PaddingBottom = UDim.new(0, 10)
+pad.PaddingLeft = UDim.new(0, 12)
+pad.PaddingRight = UDim.new(0, 12)
 pad.Parent = root
 
 local layout = Instance.new("UIListLayout")
 layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Padding = UDim.new(0, 6)
+layout.Padding = UDim.new(0, 5)
 layout.Parent = root
 
 local titleRow = Instance.new("Frame")
 titleRow.BackgroundTransparency = 1
-titleRow.Size = UDim2.new(1, 0, 0, 26)
+titleRow.Size = UDim2.new(1, 0, 0, 30)
 titleRow.LayoutOrder = 1
 titleRow.Parent = root
 
 local titleLbl = Instance.new("TextLabel")
 titleLbl.BackgroundTransparency = 1
-titleLbl.Size = UDim2.new(1, -36, 1, 0)
+titleLbl.Size = UDim2.new(1, -48, 1, 0)
 titleLbl.Font = Enum.Font.GothamBold
-titleLbl.TextSize = 17
+titleLbl.TextSize = 16
 titleLbl.TextColor3 = TEXT_WHITE
 titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-titleLbl.Text = "Rate player"
+titleLbl.Text = "Player Review"
 titleLbl.Parent = titleRow
 
 local closeBtn = Instance.new("TextButton")
-closeBtn.Size = UDim2.new(0, 28, 0, 28)
+closeBtn.Name = "CloseButton"
+closeBtn.Size = UDim2.new(0, 32, 0, 32)
 closeBtn.Position = UDim2.new(1, 0, 0, 0)
 closeBtn.AnchorPoint = Vector2.new(1, 0)
-closeBtn.BackgroundColor3 = ACCENT
+closeBtn.BackgroundColor3 = Color3.fromRGB(232, 92, 107)
 closeBtn.TextColor3 = TEXT_WHITE
 closeBtn.Text = "X"
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
-closeBtn.AutoButtonColor = false
+closeBtn.TextSize = 16
+closeBtn.AutoButtonColor = true
 closeBtn.Parent = titleRow
 local closeC = Instance.new("UICorner")
 closeC.CornerRadius = UDim.new(0, 6)
 closeC.Parent = closeBtn
+local closeStroke = Instance.new("UIStroke")
+closeStroke.Color = Color3.fromRGB(255, 214, 220)
+closeStroke.Thickness = 1
+closeStroke.Transparency = 0.35
+closeStroke.Parent = closeBtn
+local titleDivider = Instance.new("Frame")
+titleDivider.Name = "Divider"
+titleDivider.AnchorPoint = Vector2.new(0, 1)
+titleDivider.Position = UDim2.new(0, 0, 1, 0)
+titleDivider.Size = UDim2.new(1, 0, 0, 1)
+titleDivider.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+titleDivider.BackgroundTransparency = 0.9
+titleDivider.BorderSizePixel = 0
+titleDivider.Parent = titleRow
 
 local targetDisplayLbl = Instance.new("TextLabel")
 targetDisplayLbl.BackgroundTransparency = 1
-targetDisplayLbl.Size = UDim2.new(1, 0, 0, 20)
+targetDisplayLbl.Size = UDim2.new(1, 0, 0, 18)
 targetDisplayLbl.LayoutOrder = 2
 targetDisplayLbl.Font = Enum.Font.GothamBold
-targetDisplayLbl.TextSize = 15
+targetDisplayLbl.TextSize = 14
 targetDisplayLbl.TextColor3 = TEXT_WHITE
 targetDisplayLbl.TextXAlignment = Enum.TextXAlignment.Left
 targetDisplayLbl.Text = ""
@@ -150,10 +191,10 @@ targetDisplayLbl.Parent = root
 
 local targetUserLbl = Instance.new("TextLabel")
 targetUserLbl.BackgroundTransparency = 1
-targetUserLbl.Size = UDim2.new(1, 0, 0, 16)
+targetUserLbl.Size = UDim2.new(1, 0, 0, 14)
 targetUserLbl.LayoutOrder = 3
 targetUserLbl.Font = Enum.Font.Gotham
-targetUserLbl.TextSize = 12
+targetUserLbl.TextSize = 11
 targetUserLbl.TextColor3 = TEXT_MUTED
 targetUserLbl.TextXAlignment = Enum.TextXAlignment.Left
 targetUserLbl.Text = ""
@@ -232,10 +273,10 @@ eligibilitySectionLayout.Parent = eligibilitySection
 local eligibilityLbl = Instance.new("TextLabel")
 eligibilityLbl.Name = "EligibilityStatus"
 eligibilityLbl.BackgroundTransparency = 1
-eligibilityLbl.Size = UDim2.new(1, 0, 0, 28)
+eligibilityLbl.Size = UDim2.new(1, 0, 0, 24)
 eligibilityLbl.LayoutOrder = 1
 eligibilityLbl.Font = Enum.Font.GothamMedium
-eligibilityLbl.TextSize = 12
+eligibilityLbl.TextSize = 11
 eligibilityLbl.TextColor3 = TEXT_MUTED
 eligibilityLbl.TextXAlignment = Enum.TextXAlignment.Left
 eligibilityLbl.TextYAlignment = Enum.TextYAlignment.Top
@@ -292,10 +333,10 @@ end
 
 local summaryLbl = Instance.new("TextLabel")
 summaryLbl.BackgroundTransparency = 1
-summaryLbl.Size = UDim2.new(1, 0, 0, 34)
+summaryLbl.Size = UDim2.new(1, 0, 0, 26)
 summaryLbl.LayoutOrder = 6
 summaryLbl.Font = Enum.Font.Gotham
-summaryLbl.TextSize = 13
+summaryLbl.TextSize = 12
 summaryLbl.TextColor3 = TEXT_MUTED
 summaryLbl.TextXAlignment = Enum.TextXAlignment.Left
 summaryLbl.TextYAlignment = Enum.TextYAlignment.Top
@@ -308,7 +349,7 @@ recentReviewsScroll.Name = "RecentReviews"
 recentReviewsScroll.BackgroundTransparency = 0.25
 recentReviewsScroll.BackgroundColor3 = Color3.fromRGB(18, 22, 38)
 recentReviewsScroll.BorderSizePixel = 0
-recentReviewsScroll.Size = UDim2.new(1, 0, 0, 96)
+recentReviewsScroll.Size = UDim2.new(1, 0, 0, 72)
 recentReviewsScroll.LayoutOrder = 7
 recentReviewsScroll.ScrollBarThickness = 4
 recentReviewsScroll.ScrollBarImageColor3 = ACCENT
@@ -341,10 +382,10 @@ recentReviewsLayout.Parent = recentReviewsList
 
 local ratingSectionTitle = Instance.new("TextLabel")
 ratingSectionTitle.BackgroundTransparency = 1
-ratingSectionTitle.Size = UDim2.new(1, 0, 0, 16)
+ratingSectionTitle.Size = UDim2.new(1, 0, 0, 14)
 ratingSectionTitle.LayoutOrder = 8
 ratingSectionTitle.Font = Enum.Font.GothamBold
-ratingSectionTitle.TextSize = 12
+ratingSectionTitle.TextSize = 11
 ratingSectionTitle.TextColor3 = TEXT_WHITE
 ratingSectionTitle.TextXAlignment = Enum.TextXAlignment.Left
 ratingSectionTitle.Text = "Rating (required)"
@@ -352,14 +393,14 @@ ratingSectionTitle.Parent = root
 
 local ratingRow = Instance.new("Frame")
 ratingRow.BackgroundTransparency = 1
-ratingRow.Size = UDim2.new(1, 0, 0, 36)
+ratingRow.Size = UDim2.new(1, 0, 0, 32)
 ratingRow.LayoutOrder = 9
 ratingRow.Parent = root
 
 local ratingLayout = Instance.new("UIListLayout")
 ratingLayout.FillDirection = Enum.FillDirection.Horizontal
 ratingLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-ratingLayout.Padding = UDim.new(0, 6)
+ratingLayout.Padding = UDim.new(0, 4)
 ratingLayout.Parent = ratingRow
 
 local ratingButtons: { TextButton } = {}
@@ -369,12 +410,12 @@ local ratingStrokeIdle = Color3.fromRGB(75, 80, 105)
 for i = 1, 5 do
 	local b = Instance.new("TextButton")
 	b.Name = "Rate" .. i
-	b.Size = UDim2.new(0, 46, 0, 34)
+	b.Size = UDim2.new(0, 40, 0, 30)
 	b.BackgroundColor3 = defaultRatingBg
 	b.TextColor3 = TEXT_WHITE
 	b.Text = tostring(i)
 	b.Font = Enum.Font.GothamBold
-	b.TextSize = 15
+	b.TextSize = 14
 	b.AutoButtonColor = false
 	b.Parent = ratingRow
 	local bc = Instance.new("UICorner")
@@ -391,10 +432,10 @@ end
 
 local ratingHintLbl = Instance.new("TextLabel")
 ratingHintLbl.BackgroundTransparency = 1
-ratingHintLbl.Size = UDim2.new(1, 0, 0, 14)
+ratingHintLbl.Size = UDim2.new(1, 0, 0, 12)
 ratingHintLbl.LayoutOrder = 10
 ratingHintLbl.Font = Enum.Font.Gotham
-ratingHintLbl.TextSize = 11
+ratingHintLbl.TextSize = 10
 ratingHintLbl.TextColor3 = TEXT_MUTED
 ratingHintLbl.TextXAlignment = Enum.TextXAlignment.Left
 ratingHintLbl.Text = "Tap a number (1 = low, 5 = high)"
@@ -402,17 +443,17 @@ ratingHintLbl.Parent = root
 
 local commentTitle = Instance.new("TextLabel")
 commentTitle.BackgroundTransparency = 1
-commentTitle.Size = UDim2.new(1, 0, 0, 16)
+commentTitle.Size = UDim2.new(1, 0, 0, 14)
 commentTitle.LayoutOrder = 11
 commentTitle.Font = Enum.Font.GothamBold
-commentTitle.TextSize = 12
+commentTitle.TextSize = 11
 commentTitle.TextColor3 = TEXT_WHITE
 commentTitle.TextXAlignment = Enum.TextXAlignment.Left
 commentTitle.Text = "Comment (optional)"
 commentTitle.Parent = root
 
 local commentBox = Instance.new("TextBox")
-commentBox.Size = UDim2.new(1, 0, 0, 64)
+commentBox.Size = UDim2.new(1, 0, 0, 52)
 commentBox.LayoutOrder = 12
 commentBox.BackgroundColor3 = Color3.fromRGB(22, 28, 45)
 commentBox.TextColor3 = TEXT_WHITE
@@ -420,7 +461,7 @@ commentBox.PlaceholderColor3 = TEXT_MUTED
 commentBox.PlaceholderText = "Optional (max 160 chars)"
 commentBox.ClearTextOnFocus = false
 commentBox.Text = ""
-commentBox.TextSize = 13
+commentBox.TextSize = 12
 commentBox.Font = Enum.Font.Gotham
 commentBox.TextXAlignment = Enum.TextXAlignment.Left
 commentBox.TextYAlignment = Enum.TextYAlignment.Top
@@ -439,10 +480,10 @@ cbPad.Parent = commentBox
 
 local statusLbl = Instance.new("TextLabel")
 statusLbl.BackgroundTransparency = 1
-statusLbl.Size = UDim2.new(1, 0, 0, 30)
+statusLbl.Size = UDim2.new(1, 0, 0, 24)
 statusLbl.LayoutOrder = 13
 statusLbl.Font = Enum.Font.Gotham
-statusLbl.TextSize = 12
+statusLbl.TextSize = 11
 statusLbl.TextColor3 = TEXT_MUTED
 statusLbl.TextXAlignment = Enum.TextXAlignment.Left
 statusLbl.TextYAlignment = Enum.TextYAlignment.Top
@@ -452,12 +493,12 @@ statusLbl.Visible = false
 statusLbl.Parent = root
 
 local submitBtn = Instance.new("TextButton")
-submitBtn.Size = UDim2.new(1, 0, 0, 36)
+submitBtn.Size = UDim2.new(1, 0, 0, 34)
 submitBtn.LayoutOrder = 14
 submitBtn.BackgroundColor3 = SUCCESS
 submitBtn.TextColor3 = TEXT_WHITE
 submitBtn.Font = Enum.Font.GothamBold
-submitBtn.TextSize = 14
+submitBtn.TextSize = 13
 submitBtn.Text = "Submit review"
 submitBtn.AutoButtonColor = false
 submitBtn.Active = false
@@ -585,8 +626,128 @@ local function getCharacterModelFromPart(inst: Instance?): Model?
 	return nil
 end
 
+local function getAncestorScreenGui(inst: Instance?): ScreenGui?
+	local current = inst
+	while current do
+		if current:IsA("ScreenGui") then
+			return current
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+local function buildGuiPathToScreenGui(inst: Instance?): string
+	if not inst then
+		return "nil"
+	end
+
+	local parts = {}
+	local current: Instance? = inst
+	while current do
+		table.insert(parts, 1, current.Name)
+		if current:IsA("ScreenGui") then
+			break
+		end
+		current = current.Parent
+	end
+	return table.concat(parts, "/")
+end
+
+local function getGuiInteractableFlag(inst: Instance): string
+	local ok, value = pcall(function()
+		return (inst :: any).Interactable
+	end)
+	if not ok then
+		return "n/a"
+	end
+	return tostring(value)
+end
+
+local function getBlockingReviewInputGuiObject(inst: Instance): GuiObject?
+	local current: Instance? = inst
+
+	while current and not current:IsA("ScreenGui") do
+		if current:IsA("GuiObject") then
+			local guiObject = current
+			local screenGuiAncestor = getAncestorScreenGui(guiObject)
+
+			if screenGuiAncestor == screenGui then
+				return nil
+			end
+
+			if screenGuiAncestor and not screenGuiAncestor.Enabled then
+				return nil
+			end
+
+			if guiObject.Visible then
+				local okInteractable, interactable = pcall(function()
+					return (guiObject :: any).Interactable
+				end)
+
+				local canInteract = not okInteractable or interactable ~= false
+				if canInteract then
+					local isBlockingInput = guiObject:IsA("TextBox")
+						or guiObject:IsA("GuiButton")
+						or (guiObject:IsA("ScrollingFrame") and guiObject.Active)
+
+					if isBlockingInput then
+						return guiObject
+					end
+				end
+			end
+		end
+
+		current = current.Parent
+	end
+
+	return nil
+end
+
 local function isScreenPointOverScreenGui(screenPos: Vector2): boolean
-	return #GuiService:GetGuiObjectsAtPosition(screenPos.X, screenPos.Y) > 0
+	if not LocalPlayer then
+		return false
+	end
+
+	local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+	if not playerGui or not playerGui:IsA("PlayerGui") then
+		return false
+	end
+
+	local ok, guiObjects = pcall(function()
+		return playerGui:GetGuiObjectsAtPosition(screenPos.X, screenPos.Y)
+	end)
+	if not ok then
+		local nowClock = os.clock()
+		if nowClock - guiObjectsAtPositionWarnedAt >= GUI_LOOKUP_WARN_INTERVAL then
+			guiObjectsAtPositionWarnedAt = nowClock
+			warn(string.format("%s GetGuiObjectsAtPosition failed: %s", LOG_PREFIX, tostring(guiObjects)))
+		end
+		return false
+	end
+
+	if typeof(guiObjects) ~= "table" or #guiObjects == 0 then
+		return false
+	end
+
+	for _, hit in ipairs(guiObjects) do
+		local blockingHit = getBlockingReviewInputGuiObject(hit)
+		if blockingHit ~= nil then
+			debugLogRateLimited(
+				"gui_block_hits",
+				1,
+				"review input blocked by interactive gui name=%s class=%s active=%s interactable=%s path=%s",
+				blockingHit.Name,
+				blockingHit.ClassName,
+				tostring(blockingHit.Active),
+				getGuiInteractableFlag(blockingHit),
+				buildGuiPathToScreenGui(blockingHit)
+			)
+			return true
+		end
+	end
+
+	return false
 end
 
 local function getRootPart(char: Model): BasePart?
@@ -680,11 +841,16 @@ end
 
 -- ——— Eligible-target hover (desktop pointer; same gates as opening a review) ———
 local HOVER_ELIGIBILITY_POLL = 2
+local HOVER_RESOLVE_INTERVAL = 0.12
 local hoverTrackSeq = 0
 local hoverPlayer: Player? = nil
 local hoverDisplayActive = false
 local hoverNextPollTime = 0
 local hoverHighlight: Highlight? = nil
+local hoverResolveDirty = true
+local hoverLastResolveAt = 0
+local hoverLastMousePos: Vector2? = nil
+local hoverLastEligibilityState = "unknown"
 
 local function displayNameForHover(p: Player): string
 	return p.DisplayName ~= "" and p.DisplayName or p.Name
@@ -726,12 +892,115 @@ local function ensureHoverHighlightOn(char: Model)
 end
 
 local function clearEligibleHover()
+	local previous = hoverPlayer
 	hoverTrackSeq += 1
 	hoverPlayer = nil
 	hoverDisplayActive = false
 	hoverNextPollTime = 0
+	hoverResolveDirty = true
+	hoverLastEligibilityState = "unknown"
 	detachHoverHighlight()
 	hoverPromptWrap.Visible = false
+	if previous then
+		debugLog("hover target changed %s -> nil", previous.Name)
+	end
+end
+
+local function setHoverTarget(nextPlayer: Player?)
+	if hoverPlayer == nextPlayer then
+		return
+	end
+
+	local previous = hoverPlayer
+	hoverTrackSeq += 1
+	hoverPlayer = nextPlayer
+	hoverDisplayActive = false
+	hoverNextPollTime = 0
+	hoverLastEligibilityState = "unknown"
+	detachHoverHighlight()
+	hoverPromptWrap.Visible = false
+
+	if not previous and nextPlayer then
+		debugLog("hover target changed nil -> %s", nextPlayer.Name)
+	elseif previous and not nextPlayer then
+		debugLog("hover target changed %s -> nil", previous.Name)
+	end
+end
+
+local function canProcessHover(): boolean
+	return not root.Visible
+		and UserInputService.MouseEnabled
+		and not GuiService.MenuIsOpen
+		and UserInputService:GetFocusedTextBox() == nil
+		and screenGui.Enabled
+end
+
+local function refreshHoverTarget(screenPos: Vector2)
+	if not canProcessHover() then
+		if hoverPlayer ~= nil then
+			clearEligibleHover()
+		end
+		return
+	end
+
+	debugLogRateLimited("hover_refresh", 1, "hover refresh triggered")
+
+	local other = resolveOtherPlayerFromScreenPoint(screenPos)
+	if not other or not withinReviewDistanceTo(other) then
+		if hoverPlayer ~= nil then
+			clearEligibleHover()
+		end
+		return
+	end
+
+	setHoverTarget(other)
+
+	local nowClock = os.clock()
+	local pollDue = nowClock >= hoverNextPollTime
+	if pollDue then
+		hoverNextPollTime = nowClock + HOVER_ELIGIBILITY_POLL
+	end
+
+	local seqAtStart = hoverTrackSeq
+	local targetForPoll = other
+
+	if pollDue then
+		debugLog("hover eligibility poll started for %s (%d)", targetForPoll.Name, targetForPoll.UserId)
+		task.spawn(function()
+			local ok, raw = pcall(function()
+				return Remotes.GetReviewCityEligibility:InvokeServer(targetForPoll.UserId)
+			end)
+			if seqAtStart ~= hoverTrackSeq then
+				return
+			end
+			if hoverPlayer ~= targetForPoll then
+				return
+			end
+			local eligible = select(1, parseReviewEligibilityResponse(ok and raw or false))
+			local eligibilityState = if eligible then "eligible" else "blocked"
+			if hoverLastEligibilityState ~= eligibilityState then
+				hoverLastEligibilityState = eligibilityState
+				debugLog("hover eligibility result changed for %s -> %s", targetForPoll.Name, eligibilityState)
+			end
+			if not eligible then
+				hoverDisplayActive = false
+				detachHoverHighlight()
+				hoverPromptWrap.Visible = false
+				return
+			end
+			if hoverPlayer ~= targetForPoll then
+				return
+			end
+			hoverDisplayActive = true
+			local char = targetForPoll.Character
+			if char then
+				ensureHoverHighlightOn(char)
+			end
+			hoverPromptLbl.Text = string.format("Click to review %s", displayNameForHover(targetForPoll))
+			hoverPromptWrap.Visible = true
+			layoutHoverPromptScreenPos(screenPos)
+		end)
+	end
 end
 
 RunService.RenderStepped:Connect(function()
@@ -780,7 +1049,7 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 
-	if not UserInputService.MouseEnabled then
+	if not canProcessHover() then
 		if hoverPlayer ~= nil then
 			clearEligibleHover()
 		end
@@ -788,71 +1057,40 @@ RunService.RenderStepped:Connect(function()
 	end
 
 	local mousePos = UserInputService:GetMouseLocation()
-	local other = resolveOtherPlayerFromScreenPoint(mousePos)
-	if not other or not withinReviewDistanceTo(other) then
-		clearEligibleHover()
-		return
-	end
-
 	local nowClock = os.clock()
-
-	if hoverPlayer ~= other then
-		hoverTrackSeq += 1
-		hoverPlayer = other
-		hoverDisplayActive = false
-		hoverNextPollTime = 0
-		detachHoverHighlight()
-		hoverPromptWrap.Visible = false
+	if hoverLastMousePos == nil or (mousePos - hoverLastMousePos).Magnitude >= 1 then
+		hoverLastMousePos = mousePos
+		hoverResolveDirty = true
 	end
 
-	local pollDue = nowClock >= hoverNextPollTime
-	if pollDue then
-		hoverNextPollTime = nowClock + HOVER_ELIGIBILITY_POLL
+	if hoverPlayer and (not hoverPlayer.Parent or not hoverPlayer.Character or not withinReviewDistanceTo(hoverPlayer)) then
+		clearEligibleHover()
 	end
 
-	local seqAtStart = hoverTrackSeq
-	local targetForPoll = other
-
-	if pollDue then
-		task.spawn(function()
-			local ok, raw = pcall(function()
-				return Remotes.GetReviewCityEligibility:InvokeServer(targetForPoll.UserId)
-			end)
-			if seqAtStart ~= hoverTrackSeq then
-				return
-			end
-			if hoverPlayer ~= targetForPoll then
-				return
-			end
-			local eligible = select(1, parseReviewEligibilityResponse(ok and raw or false))
-			if not eligible then
-				hoverDisplayActive = false
-				detachHoverHighlight()
-				hoverPromptWrap.Visible = false
-				return
-			end
-			if hoverPlayer ~= targetForPoll then
-				return
-			end
-			hoverDisplayActive = true
-			local char = targetForPoll.Character
-			if char then
-				ensureHoverHighlightOn(char)
-			end
-			hoverPromptLbl.Text = string.format("Click to review %s", displayNameForHover(targetForPoll))
-			hoverPromptWrap.Visible = true
-			layoutHoverPromptScreenPos(UserInputService:GetMouseLocation())
-		end)
+	local refreshDue = hoverResolveDirty or (hoverPlayer ~= nil and nowClock - hoverLastResolveAt >= HOVER_RESOLVE_INTERVAL)
+	if refreshDue and nowClock - hoverLastResolveAt >= HOVER_RESOLVE_INTERVAL then
+		hoverResolveDirty = false
+		hoverLastResolveAt = nowClock
+		refreshHoverTarget(mousePos)
 	end
 
-	if hoverDisplayActive and hoverPlayer == other then
+	if hoverDisplayActive and hoverPlayer then
 		layoutHoverPromptScreenPos(mousePos)
-		local char = other.Character
+		local char = hoverPlayer.Character
 		if char then
 			ensureHoverHighlightOn(char)
 		else
 			detachHoverHighlight()
 		end
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseMovement then
+		hoverResolveDirty = true
+	elseif input.UserInputType == Enum.UserInputType.Touch then
+		hoverResolveDirty = true
+		hoverLastMousePos = Vector2.new(input.Position.X, input.Position.Y)
 	end
 end)
 
@@ -1214,7 +1452,7 @@ local function invalidatePending(reason: string?)
 	hidePendingHint()
 
 	if reason == "timeout" and had then
-		log("pending expired target=%s", had.Name)
+		debugLog("pending review invalidated reason=timeout target=%s", had.Name)
 		return
 	end
 
@@ -1231,7 +1469,7 @@ local function invalidatePending(reason: string?)
 	}
 	local msg = messages[reason]
 	if msg and had then
-		log(msg)
+		debugLog("pending review invalidated reason=%s target=%s", reason, had.Name)
 	end
 end
 
@@ -1243,7 +1481,7 @@ local function armPendingReviewTarget(target: Player)
 	pendingEligibilityPollNext = 0
 	pendingHintLbl.Text = string.format("%s — tap again to open · %.1fs", display, PENDING_CONFIRM_SECONDS)
 	pendingHint.Visible = true
-	log("pending target=%s (%d)", target.Name, target.UserId)
+	debugLog("pending review armed target=%s (%d)", target.Name, target.UserId)
 	task.delay(PENDING_CONFIRM_SECONDS, function()
 		if armSeq == pendingReviewSeq and pendingReviewTarget == target then
 			invalidatePending("timeout")
@@ -1472,6 +1710,17 @@ local function submitReviewForLockedTarget(): ()
 				tonumber(result.totalReviews) or 0
 			)
 			fetchSummaryForLockedTarget()
+			task.delay(1.15, function()
+				local samePanel = root.Visible
+					and sessionAtSubmit == summaryFetchToken
+					and selectedTargetUserId == uidAtSubmit
+					and selectedTargetPlayer ~= nil
+					and selectedTargetPlayer.UserId == uidAtSubmit
+					and not submitRequestInFlight
+				if samePanel then
+					closeReviewPanel("submit_success")
+				end
+			end)
 			return
 		end
 
@@ -1546,9 +1795,9 @@ local function openReviewPanel(target: Player, fromPendingConfirm: boolean?)
 	root.Visible = true
 
 	if fromPendingConfirm then
-		log("panel opened for confirmed target %s (%d)", target.Name, target.UserId)
+		debugLog("review panel opened for confirmed target %s (%d)", target.Name, target.UserId)
 	else
-		log("panel opened for %s (%d)", target.Name, target.UserId)
+		debugLog("review panel opened for %s (%d)", target.Name, target.UserId)
 	end
 
 	fetchSummaryForLockedTarget()
@@ -1588,24 +1837,46 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed: boolean)
 		return
 	end
 
+	if GuiService.MenuIsOpen then
+		return
+	end
+
+	if UserInputService:GetFocusedTextBox() ~= nil then
+		return
+	end
+
+	if not screenGui.Enabled then
+		return
+	end
+
 	local pos = if input.UserInputType == Enum.UserInputType.Touch
 		then Vector2.new(input.Position.X, input.Position.Y)
 		else UserInputService:GetMouseLocation()
 
+	if isScreenPointOverScreenGui(pos) then
+		debugLogRateLimited("review_reject_over_gui", 1, "review attempt rejected: over gui")
+		return
+	end
+
 	local other = resolveOtherPlayerFromScreenPoint(pos)
 	if not other then
+		debugLogRateLimited("review_reject_no_player", 1, "review attempt rejected: no player found")
 		return
 	end
 
 	if not withinReviewDistanceTo(other) then
+		log("review attempt rejected: too far away from %s", other.Name)
 		return
 	end
+
+	local confirmingPendingTarget = pendingReviewTarget == other
 
 	local okElig, rawElig = pcall(function()
 		return Remotes.GetReviewCityEligibility:InvokeServer(other.UserId)
 	end)
 	local eligible, failKind = parseReviewEligibilityResponse(if okElig then rawElig else false)
 	if not eligible then
+		log("review attempt rejected: not eligible for %s (%s)", other.Name, failKind)
 		if root.Visible then
 			showFeedback(eligibilityFailMessage(failKind), true)
 		end
@@ -1617,7 +1888,8 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed: boolean)
 		return
 	end
 
-	if pendingReviewTarget == other then
+	if confirmingPendingTarget then
+		debugLog("pending review confirmed target=%s (%d)", other.Name, other.UserId)
 		openReviewPanel(other, true)
 		return
 	end

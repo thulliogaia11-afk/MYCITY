@@ -79,6 +79,202 @@ local function safeInvoke(rf: RemoteFunction, ...: any): any
 	return nil
 end
 
+local function getLocalPlayerJob(): string
+	local data = safeInvoke(Remotes.GetPlayerData)
+	if typeof(data) == "table" and typeof(data.Job) == "string" then
+		return data.Job
+	end
+	return "Unemployed"
+end
+
+local updateMissionVisibility: (() -> ())? = nil
+local missionRuntimeFolder: Folder? = nil
+local missionRuntimeWarnedMissing = false
+local missionRuntimeConnectionsBound = false
+local missionOriginalTransparency: { [Instance]: number } = {}
+local missionOriginalLocalTransparency: { [BasePart]: number } = {}
+local missionOriginalEnabled: { [Instance]: boolean } = {}
+local missionOriginalVisible: { [Instance]: boolean } = {}
+
+local function ensureMissionRuntimeFolder(): Folder?
+	local existing = workspace:FindFirstChild("MissionRuntime")
+	if existing and existing:IsA("Folder") then
+		missionRuntimeFolder = existing
+		missionRuntimeWarnedMissing = false
+		return existing
+	end
+	if not missionRuntimeWarnedMissing then
+		missionRuntimeWarnedMissing = true
+		warn("[CLIENT] MissionRuntime missing; retrying until found")
+	end
+	return nil
+end
+
+local function bindMissionRuntimeFolder(folder: Folder)
+	if missionRuntimeConnectionsBound and missionRuntimeFolder == folder then
+		return
+	end
+
+	missionRuntimeFolder = folder
+	missionRuntimeConnectionsBound = true
+
+	folder.ChildAdded:Connect(function()
+		if updateMissionVisibility then
+			task.defer(updateMissionVisibility)
+		end
+	end)
+
+	folder.ChildRemoved:Connect(function()
+		if updateMissionVisibility then
+			task.defer(updateMissionVisibility)
+		end
+	end)
+end
+
+updateMissionVisibility = function()
+	local runtimeFolder = ensureMissionRuntimeFolder()
+	local myJob = getLocalPlayerJob()
+	local hiddenCount = 0
+	local shownCount = 0
+
+	if not runtimeFolder then
+		return
+	end
+
+	for _, mission in runtimeFolder:GetChildren() do
+		if mission:IsA("BasePart") then
+			local requiredJob = mission:GetAttribute("RequiredJob")
+			local assignedUserId = mission:GetAttribute("AssignedUserId")
+			local visible = true
+			local leakingDescendants: { string } = {}
+
+			if typeof(myJob) ~= "string" or myJob == "" or myJob == "Unemployed" then
+				visible = false
+			elseif typeof(requiredJob) == "string" and requiredJob ~= myJob then
+				visible = false
+			elseif typeof(assignedUserId) == "number" and assignedUserId ~= 0 and assignedUserId ~= LocalPlayer.UserId then
+				visible = false
+			end
+
+			if missionOriginalTransparency[mission] == nil then
+				missionOriginalTransparency[mission] = mission.Transparency
+			end
+			if missionOriginalLocalTransparency[mission] == nil then
+				missionOriginalLocalTransparency[mission] = mission.LocalTransparencyModifier
+			end
+
+			mission.LocalTransparencyModifier = if visible then missionOriginalLocalTransparency[mission] or 0 else 1
+			mission.Transparency = if visible then missionOriginalTransparency[mission] or 0 else 1
+
+			for _, descendant in mission:GetDescendants() do
+				if descendant:IsA("BasePart") then
+					if missionOriginalTransparency[descendant] == nil then
+						missionOriginalTransparency[descendant] = descendant.Transparency
+					end
+					if missionOriginalLocalTransparency[descendant] == nil then
+						missionOriginalLocalTransparency[descendant] = descendant.LocalTransparencyModifier
+					end
+					descendant.LocalTransparencyModifier =
+						if visible then missionOriginalLocalTransparency[descendant] or 0 else 1
+					descendant.Transparency = if visible then missionOriginalTransparency[descendant] or 0 else 1
+				elseif descendant:IsA("BillboardGui")
+					or descendant:IsA("SurfaceGui")
+					or descendant:IsA("Highlight")
+					or descendant:IsA("ProximityPrompt")
+					or descendant:IsA("Beam")
+					or descendant:IsA("ParticleEmitter")
+				then
+					if missionOriginalEnabled[descendant] == nil then
+						missionOriginalEnabled[descendant] = descendant.Enabled
+					end
+					descendant.Enabled = if visible then missionOriginalEnabled[descendant] else false
+				elseif descendant:IsA("SelectionBox") then
+					if missionOriginalVisible[descendant] == nil then
+						missionOriginalVisible[descendant] = descendant.Visible
+					end
+					descendant.Visible = if visible then missionOriginalVisible[descendant] else false
+				end
+			end
+
+			if not visible then
+				for _, descendant in mission:GetDescendants() do
+					if descendant:IsA("BillboardGui")
+						or descendant:IsA("SurfaceGui")
+						or descendant:IsA("Highlight")
+						or descendant:IsA("ProximityPrompt")
+						or descendant:IsA("Beam")
+						or descendant:IsA("ParticleEmitter")
+					then
+						if descendant.Enabled then
+							table.insert(leakingDescendants, descendant.ClassName)
+						end
+					elseif descendant:IsA("SelectionBox") then
+						if descendant.Visible then
+							table.insert(leakingDescendants, descendant.ClassName)
+						end
+					elseif descendant:IsA("BasePart") then
+						if descendant.Transparency < 1 or descendant.LocalTransparencyModifier < 1 then
+							table.insert(leakingDescendants, descendant.ClassName)
+						end
+					end
+				end
+			end
+
+			if visible then
+				shownCount += 1
+			else
+				hiddenCount += 1
+				print(
+					string.format(
+						"[CLIENT] hidden mission debug: name=%s title=%s leaking=%s",
+						mission.Name,
+						tostring(mission:GetAttribute("MissionTitle") or ""),
+						#leakingDescendants > 0 and table.concat(leakingDescendants, ",") or "none"
+					)
+				)
+			end
+		end
+	end
+
+	print(string.format("[CLIENT] mission visibility updated: job=%s shown=%d hidden=%d", tostring(myJob), shownCount, hiddenCount))
+end
+
+workspace.ChildAdded:Connect(function(child)
+	if child:IsA("Folder") and child.Name == "MissionRuntime" then
+		bindMissionRuntimeFolder(child)
+		if updateMissionVisibility then
+			task.defer(updateMissionVisibility)
+		end
+	end
+end)
+
+task.spawn(function()
+	while true do
+		if workspace:FindFirstChild("MY_CITY_Missions") then
+			warn("[CLIENT] Legacy mission folder detected: MY_CITY_Missions")
+		end
+		local hud = PlayerGui:FindFirstChild("MyCityHUD")
+		if hud and hud.Parent and updateMissionVisibility then
+			updateMissionVisibility()
+		end
+		task.wait(4)
+	end
+end)
+
+task.defer(function()
+	while true do
+		local runtimeFolder = ensureMissionRuntimeFolder()
+		if runtimeFolder then
+			bindMissionRuntimeFolder(runtimeFolder)
+			if updateMissionVisibility then
+				updateMissionVisibility()
+			end
+			break
+		end
+		task.wait(1)
+	end
+end)
+
 -- ——— Root ———
 -- Avoid duplicate HUDs (e.g. script re-run / hot reload) stacking nav buttons and click handlers.
 local existingHud = PlayerGui:FindFirstChild("MyCityHUD")
@@ -928,6 +1124,53 @@ local function fillDailyMissionSection(missionOuter: Frame, pdata: any, mpRes: a
 		return lbl
 	end
 
+	local function pushProgressBar(progressValue: number, progressGoal: number, color: Color3)
+		local barBg = Instance.new("Frame")
+		barBg.Size = UDim2.new(1, 0, 0, 14)
+		barBg.BackgroundColor3 = Color3.fromRGB(30, 32, 55)
+		barBg.BorderSizePixel = 0
+		barBg.LayoutOrder = lo
+		lo += 1
+		barBg.Parent = card
+
+		local barBgCorner = Instance.new("UICorner")
+		barBgCorner.CornerRadius = UDim.new(0, 7)
+		barBgCorner.Parent = barBg
+
+		local fillRatio = if progressGoal > 0 then math.clamp(progressValue / progressGoal, 0, 1) else 0
+		local barFill = Instance.new("Frame")
+		barFill.Size = UDim2.new(fillRatio, 0, 1, 0)
+		barFill.BackgroundColor3 = color
+		barFill.BorderSizePixel = 0
+		barFill.Parent = barBg
+
+		local barFillCorner = Instance.new("UICorner")
+		barFillCorner.CornerRadius = UDim.new(0, 7)
+		barFillCorner.Parent = barFill
+	end
+
+	local function pushButton(text: string, color: Color3, onClick: () -> ())
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, 0, 0, 36)
+		btn.BackgroundColor3 = color
+		btn.BorderSizePixel = 0
+		btn.AutoButtonColor = false
+		btn.Font = Enum.Font.GothamBold
+		btn.TextSize = 14
+		btn.TextColor3 = TEXT_WHITE
+		btn.Text = text
+		btn.LayoutOrder = lo
+		lo += 1
+		btn.Parent = card
+
+		local btnCorner = Instance.new("UICorner")
+		btnCorner.CornerRadius = UDim.new(0, 8)
+		btnCorner.Parent = btn
+
+		btn.MouseButton1Click:Connect(onClick)
+		return btn
+	end
+
 	if typeof(mpRes) ~= "table" or mpRes.success ~= true then
 		pushLabel("Could not load mission progress.", TEXT_MUTED, 14, false)
 		return
@@ -936,6 +1179,114 @@ local function fillDailyMissionSection(missionOuter: Frame, pdata: any, mpRes: a
 	local d = mpRes.data
 	if typeof(d) ~= "table" then
 		pushLabel("Could not load mission progress.", TEXT_MUTED, 14, false)
+		return
+	end
+
+	local starterSlice = typeof(d.starterSlice) == "table" and d.starterSlice or nil
+	if starterSlice then
+		local slice = typeof(starterSlice.slice) == "table" and starterSlice.slice or {}
+		local job = typeof(starterSlice.job) == "table" and starterSlice.job or {}
+		local mission = typeof(starterSlice.mission) == "table" and starterSlice.mission or nil
+		local dailies = typeof(starterSlice.dailies) == "table" and starterSlice.dailies or {}
+		local aspiration = typeof(starterSlice.aspiration) == "table" and starterSlice.aspiration or {}
+		local sliceName = typeof(slice.displayName) == "string" and slice.displayName or "Ironholm"
+		local sliceTheme = typeof(slice.theme) == "string" and slice.theme or ""
+		local jobName = typeof(job.displayName) == "string" and job.displayName or "Starter Track"
+		local objectiveText = typeof(starterSlice.objectiveText) == "string" and starterSlice.objectiveText or ""
+		local objectiveFallbackText =
+			typeof(starterSlice.objectiveFallbackText) == "string" and starterSlice.objectiveFallbackText or ""
+
+		pushLabel(string.format("Premium Loop — %s", sliceName), TEXT_WHITE, 17, true)
+		if sliceTheme ~= "" then
+			pushLabel(sliceTheme, TEXT_MUTED, 13, false)
+		end
+		pushLabel(jobName, INFO, 14, true)
+		if typeof(job.shortDescription) == "string" and job.shortDescription ~= "" then
+			pushLabel(job.shortDescription, TEXT_MUTED, 13, false)
+		end
+
+		if mission then
+			local status = typeof(mission.status) == "string" and mission.status or "assigned"
+			local statusColor = if status == "completed"
+					then SUCCESS
+				elseif status == "claimed"
+					then GOLD_RANK
+				else INFO
+			local statusLabel = if status == "in_progress"
+					then "In Progress"
+				elseif status == "completed"
+					then "Completed"
+				elseif status == "claimed"
+					then "Claimed"
+				else "Assigned"
+
+			pushLabel(typeof(mission.title) == "string" and mission.title or "Starter Mission", TEXT_WHITE, 16, true)
+			if typeof(mission.shortDescription) == "string" and mission.shortDescription ~= "" then
+				pushLabel(mission.shortDescription, TEXT_MUTED, 13, false)
+			end
+			pushLabel("Status: " .. statusLabel, statusColor, 13, true)
+
+			local missionObjectiveText =
+				typeof(mission.objectiveText) == "string" and mission.objectiveText or objectiveText
+			if missionObjectiveText == "" then
+				missionObjectiveText = objectiveFallbackText
+			end
+			pushLabel(missionObjectiveText, TEXT_WHITE, 13, false)
+
+			local progressValue = typeof(mission.progressValue) == "number" and mission.progressValue or 0
+			local progressGoal = typeof(mission.progressGoal) == "number" and mission.progressGoal or 0
+			if progressGoal > 0 then
+				pushProgressBar(progressValue, progressGoal, statusColor)
+				pushLabel(string.format("%d / %d steps complete", progressValue, progressGoal), TEXT_WHITE, 13, true)
+			end
+
+			local rewardText = typeof(mission.rewardLabel) == "string" and mission.rewardLabel ~= ""
+					and mission.rewardLabel
+				or string.format("$%d payout", typeof(mission.rewardMoney) == "number" and mission.rewardMoney or 0)
+			pushLabel("Reward: " .. rewardText, SUCCESS, 13, false)
+
+			if mission.canClaim == true then
+				pushButton("Claim Courier Payout", SUCCESS, function()
+					local claimResult = safeInvoke(Remotes.ClaimStarterSliceMission)
+					local refreshedPlayerData = safeInvoke(Remotes.GetPlayerData)
+					local refreshedMissionProgress = safeInvoke(Remotes.GetMissionProgress)
+					if typeof(claimResult) == "table" and claimResult.success ~= true then
+						warn("[MY CITY CLIENT] ClaimStarterSliceMission failed")
+					end
+					fillDailyMissionSection(missionOuter, refreshedPlayerData, refreshedMissionProgress)
+				end)
+			end
+		end
+
+		if objectiveText ~= "" and (not mission or mission.canClaim ~= true) then
+			pushLabel("Next: " .. objectiveText, TEXT_MUTED, 12, false)
+		end
+
+		if #dailies > 0 then
+			pushLabel("Ironholm Dailies", TEXT_WHITE, 15, true)
+			for _, daily in ipairs(dailies) do
+				if typeof(daily) == "table" then
+					local progressValue = typeof(daily.progressValue) == "number" and daily.progressValue or 0
+					local goal = typeof(daily.goal) == "number" and daily.goal or 0
+					local dailyTitle = typeof(daily.title) == "string" and daily.title or "Daily"
+					local dailyColor = if daily.isCompleted == true then SUCCESS else TEXT_MUTED
+					pushLabel(string.format("%s — %d / %d", dailyTitle, progressValue, goal), dailyColor, 13, false)
+				end
+			end
+		end
+
+		if typeof(aspiration.title) == "string" then
+			local currentMoney = typeof(aspiration.currentMoney) == "number" and aspiration.currentMoney or 0
+			local targetCost = typeof(aspiration.targetCost) == "number" and aspiration.targetCost or 0
+			pushLabel("Next Ambition", TEXT_WHITE, 15, true)
+			pushLabel(
+				string.format("%s — $%d / $%d", aspiration.title, currentMoney, targetCost),
+				MONEY_GOLD,
+				13,
+				false
+			)
+		end
+
 		return
 	end
 
@@ -1004,57 +1355,15 @@ local function fillDailyMissionSection(missionOuter: Frame, pdata: any, mpRes: a
 	end
 
 	pushLabel(string.format("Reward: +%d CC +%d Rep on completion", rewardMoney, rewardRep), SUCCESS, 13, false)
-
-	local barBg = Instance.new("Frame")
-	barBg.Name = "MissionProgressBarBg"
-	barBg.Size = UDim2.new(1, 0, 0, 14)
-	barBg.BackgroundColor3 = Color3.fromRGB(30, 32, 55)
-	barBg.BorderSizePixel = 0
-	barBg.LayoutOrder = lo
-	lo += 1
-	barBg.Parent = card
-	local barBgC = Instance.new("UICorner")
-	barBgC.CornerRadius = UDim.new(0, 7)
-	barBgC.Parent = barBg
-
-	local fillW = if goal > 0 then math.clamp(completed / goal, 0, 1) else 0
-	local barFill = Instance.new("Frame")
-	barFill.Size = UDim2.new(fillW, 0, 1, 0)
-	barFill.BackgroundColor3 = SUCCESS
-	barFill.BorderSizePixel = 0
-	barFill.Parent = barBg
-	local barFillC = Instance.new("UICorner")
-	barFillC.CornerRadius = UDim.new(0, 7)
-	barFillC.Parent = barFill
+	pushProgressBar(completed, goal, SUCCESS)
 
 	pushLabel(string.format("%d / %d completed", completed, goal), TEXT_WHITE, 13, true)
 
 	local resetSec = secondsUntilMidnight()
 	pushLabel("Resets in " .. formatCountdown(resetSec), TEXT_MUTED, 12, false)
 
-	local completeBtn = Instance.new("TextButton")
-	completeBtn.Size = UDim2.new(1, 0, 0, 40)
-	completeBtn.BackgroundColor3 = SUCCESS
-	completeBtn.TextColor3 = TEXT_WHITE
-	completeBtn.Font = Enum.Font.GothamBold
-	completeBtn.TextSize = 15
-	completeBtn.Text = "✅ Complete Mission"
-	completeBtn.AutoButtonColor = false
-	completeBtn.LayoutOrder = lo
-	lo += 1
-	completeBtn.Parent = card
-	local cbc = Instance.new("UICorner")
-	cbc.CornerRadius = CORNER
-	cbc.Parent = completeBtn
 
-	completeBtn.MouseButton1Click:Connect(function()
-		safeInvoke(Remotes.CompleteMission, jobKey)
-		local p2 = safeInvoke(Remotes.GetPlayerData)
-		local m2 = safeInvoke(Remotes.GetMissionProgress)
-		if jobsMissionHolder then
-			fillDailyMissionSection(jobsMissionHolder :: Frame, p2, m2)
-		end
-	end)
+	pushLabel("World missions are completed at the in-world marker using the prompt.", INFO, 13, false)
 end
 local housingPanel, housingClose, housingScroll, housingScale =
 	housingBundle.Frame, housingBundle.Close, housingBundle.Scroll, housingBundle.Scale
@@ -1226,6 +1535,9 @@ function populateJobs()
 		stopBtn.MouseButton1Click:Connect(function()
 			safeInvoke(Remotes.StopWork)
 			isWorking = false
+			if updateMissionVisibility then
+				updateMissionVisibility()
+			end
 			populateJobs()
 		end)
 
@@ -1408,6 +1720,9 @@ function populateJobs()
 					local startOk = safeInvoke(Remotes.StartWork, jName)
 					if startOk == true then
 						isWorking = true
+						if updateMissionVisibility then
+							updateMissionVisibility()
+						end
 						populateJobs()
 					end
 				end)
@@ -1934,15 +2249,25 @@ local function addNavButton(key: string, label: string, open: () -> ())
 	b.Parent = navInner
 end
 
-addNavButton("jobs", "💼 Jobs", function()
-	print("[CLIENT] Opening jobs panel")
-	local ok, result = pcall(function()
-		return Remotes.GetAvailableJobs:InvokeServer()
+-- Nav_jobs: single Activated connection at script top level (not inside addNavButton).
+do
+	local prev = navButtons["jobs"]
+	if prev then
+		prev:Destroy()
+	end
+	navButtons["jobs"] = nil
+
+	local jobsNavBtn = Instance.new("TextButton")
+	jobsNavBtn.Name = "Nav_jobs"
+	jobsNavBtn.Text = "💼 Jobs"
+	styleNavButton(jobsNavBtn, "jobs")
+	jobsNavBtn.Activated:Connect(function()
+		showPanelAnimated(jobsBundle, "jobs")
+		populateJobs()
 	end)
-	print("[CLIENT] GetAvailableJobs result:", ok, result)
-	showPanelAnimated(jobsBundle, "jobs")
-	populateJobs()
-end)
+	jobsNavBtn.Parent = navInner
+end
+
 addNavButton("housing", "🏠 Housing", function()
 	showPanelAnimated(housingBundle, "housing")
 	populateHousing()
@@ -2328,6 +2653,11 @@ end)
 local activeWorldMissionPanel: Frame? = nil
 
 local function dismissWorldMissionPanel()
+	for _, child in screenGui:GetChildren() do
+		if child:IsA("Frame") and child.Name == "WorldMissionOfferPanel" then
+			child:Destroy()
+		end
+	end
 	if activeWorldMissionPanel and activeWorldMissionPanel.Parent then
 		activeWorldMissionPanel:Destroy()
 	end
@@ -2342,8 +2672,8 @@ local function showMissionResultPanel(titleText: string, subText: string, bgColo
 
 	local panel = Instance.new("Frame")
 	panel.Name = "WorldMissionResultPanel"
-	panel.AnchorPoint = Vector2.new(0.5, 1)
-	panel.Position = UDim2.new(0.5, 0, 1, -100)
+	panel.AnchorPoint = Vector2.new(0.5, 0.5)
+	panel.Position = UDim2.new(0.5, 0, 0.5, 40)
 	panel.Size = UDim2.fromOffset(420, 120)
 	panel.BackgroundColor3 = bgColor
 	panel.BackgroundTransparency = 0.08
@@ -2374,7 +2704,7 @@ local function showMissionResultPanel(titleText: string, subText: string, bgColo
 	titleLbl.TextSize = 20
 	titleLbl.TextColor3 = TEXT_WHITE
 	titleLbl.Text = titleText
-	titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+	titleLbl.TextXAlignment = Enum.TextXAlignment.Center
 	titleLbl.Parent = panel
 
 	local subLbl = Instance.new("TextLabel")
@@ -2386,13 +2716,16 @@ local function showMissionResultPanel(titleText: string, subText: string, bgColo
 	subLbl.TextColor3 = TEXT_WHITE
 	subLbl.TextWrapped = true
 	subLbl.Text = subText
-	subLbl.TextXAlignment = Enum.TextXAlignment.Left
+	subLbl.TextXAlignment = Enum.TextXAlignment.Center
 	subLbl.TextYAlignment = Enum.TextYAlignment.Top
 	subLbl.Parent = panel
 
 	panel.Size = UDim2.fromOffset(420, 40)
+	panel.BackgroundTransparency = 1
 	TweenService:Create(panel, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 		Size = UDim2.fromOffset(420, 120),
+		Position = UDim2.new(0.5, 0, 0.5, 0),
+		BackgroundTransparency = 0.08,
 	}):Play()
 
 	task.delay(durationSec, function()
@@ -2414,6 +2747,17 @@ Remotes.MissionAvailable.OnClientEvent:Connect(function(missionData: any)
 	if typeof(missionData) ~= "table" then
 		return
 	end
+
+	local localJob = getLocalPlayerJob()
+	local requiredJob = typeof(missionData.requiredJob) == "string" and missionData.requiredJob or ""
+	local assignedUserId = typeof(missionData.assignedUserId) == "number" and missionData.assignedUserId or 0
+	if localJob == "Unemployed" or localJob == "" or requiredJob ~= localJob then
+		return
+	end
+	if assignedUserId ~= 0 and assignedUserId ~= LocalPlayer.UserId then
+		return
+	end
+
 	local title = typeof(missionData.title) == "string" and missionData.title or "Mission"
 	local loc = typeof(missionData.locationName) == "string" and missionData.locationName or "?"
 	local desc = typeof(missionData.description) == "string" and missionData.description or ""
@@ -2421,116 +2765,23 @@ Remotes.MissionAvailable.OnClientEvent:Connect(function(missionData: any)
 	local money = typeof(rw.money) == "number" and rw.money or 0
 	local rep = typeof(rw.rep) == "number" and rw.rep or 0
 
-	task.spawn(showNotification, "🚨 New Mission Available: " .. title .. " at " .. loc, "info")
-
 	dismissWorldMissionPanel()
+	task.spawn(
+		showNotification,
+		string.format(
+			"New mission available: %s at %s | Reward %d CC / %d Rep | %s",
+			title,
+			loc,
+			money,
+			rep,
+			desc
+		),
+		"info"
+	)
 
-	local panel = Instance.new("Frame")
-	panel.Name = "WorldMissionOfferPanel"
-	panel.AnchorPoint = Vector2.new(1, 1)
-	panel.Position = UDim2.new(1, -16, 1, -20)
-	panel.Size = UDim2.fromOffset(300, 0)
-	panel.AutomaticSize = Enum.AutomaticSize.Y
-	panel.BackgroundColor3 = PANEL_BODY
-	panel.BackgroundTransparency = 0.06
-	panel.BorderSizePixel = 0
-	panel.ZIndex = 40
-	panel.Parent = screenGui
-
-	local pc = Instance.new("UICorner")
-	pc.CornerRadius = CORNER
-	pc.Parent = panel
-
-	local pst = Instance.new("UIStroke")
-	pst.Color = ACCENT
-	pst.Transparency = 0.5
-	pst.Parent = panel
-
-	local pad = Instance.new("UIPadding")
-	pad.PaddingTop = UDim.new(0, 12)
-	pad.PaddingBottom = UDim.new(0, 12)
-	pad.PaddingLeft = UDim.new(0, 12)
-	pad.PaddingRight = UDim.new(0, 12)
-	pad.Parent = panel
-
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 6)
-	layout.Parent = panel
-
-	local h = Instance.new("TextLabel")
-	h.BackgroundTransparency = 1
-	h.Size = UDim2.new(1, 0, 0, 22)
-	h.Font = Enum.Font.GothamBold
-	h.TextSize = 15
-	h.TextColor3 = ACCENT
-	h.TextXAlignment = Enum.TextXAlignment.Left
-	h.Text = "New mission"
-	h.LayoutOrder = 1
-	h.Parent = panel
-
-	local t = Instance.new("TextLabel")
-	t.BackgroundTransparency = 1
-	t.Size = UDim2.new(1, 0, 0, 40)
-	t.Font = Enum.Font.GothamBold
-	t.TextSize = 16
-	t.TextColor3 = TEXT_WHITE
-	t.TextWrapped = true
-	t.TextXAlignment = Enum.TextXAlignment.Left
-	t.Text = title
-	t.LayoutOrder = 2
-	t.Parent = panel
-
-	local d = Instance.new("TextLabel")
-	d.BackgroundTransparency = 1
-	d.Size = UDim2.new(1, 0, 0, 48)
-	d.Font = Enum.Font.GothamMedium
-	d.TextSize = 13
-	d.TextColor3 = TEXT_MUTED
-	d.TextWrapped = true
-	d.TextXAlignment = Enum.TextXAlignment.Left
-	d.Text = desc
-	d.LayoutOrder = 3
-	d.Parent = panel
-
-	local r = Instance.new("TextLabel")
-	r.BackgroundTransparency = 1
-	r.Size = UDim2.new(1, 0, 0, 20)
-	r.Font = Enum.Font.GothamMedium
-	r.TextSize = 13
-	r.TextColor3 = MONEY_GOLD
-	r.TextXAlignment = Enum.TextXAlignment.Left
-	r.Text = string.format("Reward: %d CC · %d Rep", money, rep)
-	r.LayoutOrder = 4
-	r.Parent = panel
-
-	local go = Instance.new("TextLabel")
-	go.BackgroundTransparency = 1
-	go.Size = UDim2.new(1, 0, 0, 18)
-	go.Font = Enum.Font.GothamMedium
-	go.TextSize = 12
-	go.TextColor3 = REP_BLUE
-	go.TextXAlignment = Enum.TextXAlignment.Left
-	go.Text = "Go to the glowing marker on the map"
-	go.LayoutOrder = 5
-	go.Parent = panel
-
-	activeWorldMissionPanel = panel
-	panel.Position = UDim2.new(1, -16, 1, 40)
-	TweenService:Create(panel, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-		Position = UDim2.new(1, -16, 1, -20),
-	}):Play()
-
-	task.delay(30, function()
-		if activeWorldMissionPanel == panel and panel.Parent then
-			TweenService:Create(panel, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-				Position = UDim2.new(1, 300, 1, -20),
-				BackgroundTransparency = 1,
-			}):Play()
-			task.wait(0.36)
-			dismissWorldMissionPanel()
-		end
-	end)
+	if updateMissionVisibility then
+		updateMissionVisibility()
+	end
 end)
 
 Remotes.MissionCompleted.OnClientEvent:Connect(function(missionData: any)
@@ -2542,11 +2793,14 @@ Remotes.MissionCompleted.OnClientEvent:Connect(function(missionData: any)
 	local rep = typeof(missionData.rep) == "number" and missionData.rep or 0
 	dismissWorldMissionPanel()
 	showMissionResultPanel(
-		"✅ MISSION COMPLETE!",
+		"MISSION COMPLETE",
 		string.format("%s\n+%d CC  +%d Rep", title, money, rep),
 		SUCCESS,
-		3
+		3.5
 	)
+	if updateMissionVisibility then
+		updateMissionVisibility()
+	end
 end)
 
 Remotes.MissionExpired.OnClientEvent:Connect(function(missionData: any)
@@ -2555,7 +2809,10 @@ Remotes.MissionExpired.OnClientEvent:Connect(function(missionData: any)
 	end
 	local title = typeof(missionData.title) == "string" and missionData.title or "Mission"
 	dismissWorldMissionPanel()
-	showMissionResultPanel("⏰ Mission expired", title, DANGER, 3)
+	showMissionResultPanel("MISSION EXPIRED", title, DANGER, 3.5)
+	if updateMissionVisibility then
+		updateMissionVisibility()
+	end
 end)
 
 task.defer(layoutRightPills)

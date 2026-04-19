@@ -47,6 +47,7 @@ export type ClubInfo = {
 	Requirement: string,
 	Description: string,
 	VipOnly: boolean,
+	MinimumReputation: number,
 }
 
 -- Stable order for iteration and GetAccessibleClubs.
@@ -121,17 +122,18 @@ local function toClubInfo(club: ClubDefinition): ClubInfo
 		Requirement = formatRequirement(club),
 		Description = club.description,
 		VipOnly = club.vipOnly,
+		MinimumReputation = effectiveMinReputation(club),
 	}
 end
 
 function ClubService.CanEnterClub(player: Player, clubName: string, quiet: boolean?): boolean
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		if not quiet then
 			print(string.format("[%s] CanEnterClub: no profile yet for %s", GAME_LABEL, player.Name))
 		end
 		return false
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local club = CLUBS[clubName]
 	if not club then
@@ -165,11 +167,11 @@ function ClubService.GetClubInfo(clubName: string): ClubInfo?
 end
 
 function ClubService.GetAccessibleClubs(player: Player): { ClubInfo }
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		print(string.format("[%s] GetAccessibleClubs: no profile yet for %s", GAME_LABEL, player.Name))
 		return {}
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local list: { ClubInfo } = {}
 	for _, id in CLUB_ORDER do
@@ -198,7 +200,7 @@ end
 
 -- Motivating denial line for notifications; nil if player may enter or club unknown.
 function ClubService.GetDeniedClientMessage(player: Player, clubName: string): string?
-	if not PlayerDataService.GetData(player) then
+	if not PlayerDataService.HasSession(player) then
 		return "Your profile is still loading. Try again in a moment."
 	end
 
@@ -223,8 +225,7 @@ function ClubService.GetDeniedClientMessage(player: Player, clubName: string): s
 end
 
 function ClubService.AttemptEnter(player: Player, clubName: string)
-	local data = PlayerDataService.GetData(player)
-	if not data then
+	if not PlayerDataService.HasSession(player) then
 		print(
 			string.format(
 				"[%s] AttemptEnter: no profile for %s — cannot enter %q",
@@ -235,6 +236,7 @@ function ClubService.AttemptEnter(player: Player, clubName: string)
 		)
 		return
 	end
+	local data = PlayerDataService.GetData(player)
 
 	local club = CLUBS[clubName]
 	if not club then
