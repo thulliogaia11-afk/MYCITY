@@ -25,7 +25,7 @@ local MAX_CAMPAIGN_MESSAGE_LEN = 280
 -- ——— Impeachment ———
 local MIN_REPUTATION_TO_IMPEACH = 150
 local IMPEACHMENT_DURATION_SEC = 1800 -- 30 minutes
-local IMPEACHMENT_YES_THRESHOLD = 0.6 -- 60%+ of city population must vote YES
+local IMPEACHMENT_YES_THRESHOLD = 0.7 -- 70%+ of city population must vote YES
 local IMPEACHED_REPUTATION_PENALTY = 50
 
 -- ——— Trade deals ———
@@ -782,6 +782,13 @@ local function syncPhaseTransitions(cityName: string)
 
 	pruneExpiredTrades(state, now)
 	tickImpeachment(cityName)
+	-- tickImpeachment may have finalized the impeachment, which resets mandateEndTime
+	-- and clears candidates/voters. Re-read state before running phase logic so we don't
+	-- accidentally run counting on a freshly-started mandate.
+	state = electionByCity[cityName]
+	if not state then
+		return
+	end
 
 	if now >= state.mandateEndTime then
 		runElectionCounting(cityName)
@@ -1036,21 +1043,21 @@ end
 
 function ElectionService.Nominate(player: Player, cityName: string, campaignMessage: string): (boolean, string)
 	if not isValidCity(cityName) then
-		return false, "Cidade inválida."
+		return false, "Invalid city."
 	end
 	local state = ensureCityElectionState(cityName)
 	if state.phase ~= "candidacy" then
-		return false, "Candidaturas só na fase de candidatura (últimas 2 horas do mandato)."
+		return false, "Nominations are only open during the candidacy phase (last 2 hours of mandate)."
 	end
 	if not playerLivesInCity(player, cityName) then
-		return false, "Você precisa morar nesta cidade para se candidatar."
+		return false, "You must live in this city to run for mayor."
 	end
 	local rep = ReputationService.GetReputation(player)
 	if rep < MIN_REPUTATION_TO_NOMINATE then
-		return false, string.format("É necessário %d+ de reputação para se candidatar.", MIN_REPUTATION_TO_NOMINATE)
+		return false, string.format("You need %d+ reputation to run for mayor.", MIN_REPUTATION_TO_NOMINATE)
 	end
 	if state.candidates[player.UserId] then
-		return false, "Você já é candidato nesta eleição."
+		return false, "You are already a candidate in this election."
 	end
 
 	local msg = typeof(campaignMessage) == "string" and campaignMessage or ""
@@ -1065,50 +1072,54 @@ function ElectionService.Nominate(player: Player, cityName: string, campaignMess
 	}
 	printTag(string.format("ElectionService: %s nominated for Mayor of %s", player.Name, cityName))
 	saveCityElectionState(cityName)
-	return true, "Candidatura registrada."
+	return true, "Candidacy registered."
 end
 
 function ElectionService.Vote(player: Player, cityName: string, candidateUserId: number): (boolean, string)
 	if not isValidCity(cityName) then
-		return false, "Cidade inválida."
+		return false, "Invalid city."
 	end
 	local state = ensureCityElectionState(cityName)
 	if state.phase ~= "voting" then
-		return false, "Votação só na fase de votação (últimos 30 minutos do mandato)."
+		return false, "Voting is only open during the voting phase (last 30 minutes of mandate)."
 	end
 	if not playerLivesInCity(player, cityName) then
-		return false, "Você precisa morar nesta cidade para votar."
+		return false, "You must live in this city to vote."
 	end
 	if state.voters[player.UserId] then
-		return false, "Você já votou nesta eleição."
+		return false, "You have already voted in this election."
 	end
 	if not state.candidates[candidateUserId] then
-		return false, "Candidato inválido."
+		return false, "Invalid candidate."
+	end
+	-- Design decision: candidates cannot vote for themselves. Forces social convincing.
+	if candidateUserId == player.UserId then
+		return false, "You cannot vote for yourself."
 	end
 
 	state.voters[player.UserId] = true
 	state.candidates[candidateUserId].votes += 1
 	printTag(string.format("ElectionService: %s voted in %s", player.Name, cityName))
 	saveCityElectionState(cityName)
-	return true, "Voto registrado."
+	return true, "Vote recorded."
 end
 
 function ElectionService.StartImpeachment(player: Player, cityName: string): (boolean, string)
 	if not isValidCity(cityName) then
-		return false, "Cidade inválida."
+		return false, "Invalid city."
 	end
 	local st = ensureCityElectionState(cityName)
 	if not st.currentMayor then
-		return false, "Não há prefeito para impeach."
+		return false, "There is no mayor to impeach."
 	end
 	if st.impeachment then
-		return false, "Já existe um processo de impeachment em andamento."
+		return false, "An impeachment process is already active."
 	end
 	if not playerLivesInCity(player, cityName) then
-		return false, "Você precisa morar nesta cidade."
+		return false, "You must live in this city to start an impeachment."
 	end
 	if ReputationService.GetReputation(player) < MIN_REPUTATION_TO_IMPEACH then
-		return false, string.format("São necessários %d+ de reputação para iniciar impeachment.", MIN_REPUTATION_TO_IMPEACH)
+		return false, string.format("You need %d+ reputation to start an impeachment.", MIN_REPUTATION_TO_IMPEACH)
 	end
 
 	local now = os.time()
@@ -1122,31 +1133,31 @@ function ElectionService.StartImpeachment(player: Player, cityName: string): (bo
 
 	notifyCityPlayers(
 		cityName,
-		string.format("⚖️ %s iniciou um voto de impeachment contra o Prefeito! Você tem 30 minutos para votar.", player.Name),
+		string.format("⚖️ %s has started an impeachment vote against the Mayor! You have 30 minutes to vote.", player.Name),
 		"info"
 	)
 	printTag(string.format("ElectionService: IMPEACHMENT STARTED in %s by %s", cityName, player.Name))
 	saveCityElectionState(cityName)
-	return true, "Votação de impeachment iniciada."
+	return true, "Impeachment vote started."
 end
 
 function ElectionService.VoteImpeachment(player: Player, cityName: string, voteYes: boolean): (boolean, string)
 	if not isValidCity(cityName) then
-		return false, "Cidade inválida."
+		return false, "Invalid city."
 	end
 	local st = ensureCityElectionState(cityName)
 	if not st.impeachment then
-		return false, "Não há impeachment ativo."
+		return false, "There is no active impeachment."
 	end
 	local now = os.time()
 	if now >= st.impeachment.endsAt then
-		return false, "O período de impeachment encerrou."
+		return false, "The impeachment window has ended."
 	end
 	if not playerLivesInCity(player, cityName) then
-		return false, "Você precisa morar nesta cidade para votar."
+		return false, "You must live in this city to vote."
 	end
 	if st.impeachment.yesVoters[player.UserId] or st.impeachment.noVoters[player.UserId] then
-		return false, "Você já votou neste impeachment."
+		return false, "You have already voted in this impeachment."
 	end
 
 	if voteYes then
@@ -1157,29 +1168,29 @@ function ElectionService.VoteImpeachment(player: Player, cityName: string, voteY
 
 	saveCityElectionState(cityName)
 	tickImpeachment(cityName)
-	return true, "Voto registrado."
+	return true, "Vote recorded."
 end
 
 function ElectionService.ProposeTrade(mayorPlayer: Player, targetCityName: string, dealType: string): (boolean, string, string?)
 	if not isValidCity(targetCityName) then
-		return false, "Cidade alvo inválida.", nil
+		return false, "Invalid target city.", nil
 	end
 	local data = PlayerDataService.GetData(mayorPlayer)
 	if not data or typeof(data.City) ~= "string" then
-		return false, "Dados indisponíveis.", nil
+		return false, "Player data unavailable.", nil
 	end
 	local fromCity = data.City
 	if not isValidCity(fromCity) then
-		return false, "Você precisa ser prefeito de uma cidade.", nil
+		return false, "You must be mayor of a city to propose trades.", nil
 	end
 	if fromCity == targetCityName then
-		return false, "Não é possível negociar com a própria cidade.", nil
+		return false, "Cannot trade with your own city.", nil
 	end
 	if not ElectionService.IsMayor(mayorPlayer, fromCity) then
-		return false, "Apenas o prefeito pode propor acordos.", nil
+		return false, "Only the mayor can propose trade deals.", nil
 	end
 	if not TRADE_TYPES[dealType] then
-		return false, "Tipo de acordo inválido.", nil
+		return false, "Invalid deal type.", nil
 	end
 
 	local stFrom = ensureCityElectionState(fromCity)
@@ -1212,7 +1223,7 @@ function ElectionService.ProposeTrade(mayorPlayer: Player, targetCityName: strin
 		if plr then
 			notifyPlayer(
 				plr,
-				string.format("🤝 Nova proposta de %s: %s (responda em 1 hora).", fromCity, dealType),
+				string.format("🤝 New trade proposal from %s: %s (respond within 1 hour).", fromCity, dealType),
 				"info"
 			)
 		end
@@ -1221,23 +1232,23 @@ function ElectionService.ProposeTrade(mayorPlayer: Player, targetCityName: strin
 	printTag(string.format("ElectionService: Trade proposed %s → %s (%s) id=%s", fromCity, targetCityName, dealType, id))
 	saveCityElectionState(fromCity)
 	saveCityElectionState(targetCityName)
-	return true, "Proposta enviada.", id
+	return true, "Proposal sent.", id
 end
 
 function ElectionService.RespondTrade(mayorPlayer: Player, dealId: string, accept: boolean): (boolean, string)
 	if typeof(dealId) ~= "string" or #dealId == 0 then
-		return false, "ID inválido."
+		return false, "Invalid deal id."
 	end
 	local data = PlayerDataService.GetData(mayorPlayer)
 	if not data or typeof(data.City) ~= "string" then
-		return false, "Dados indisponíveis."
+		return false, "Player data unavailable."
 	end
 	local myCity = data.City
 	if not isValidCity(myCity) then
-		return false, "Cidade inválida."
+		return false, "Invalid city."
 	end
 	if not ElectionService.IsMayor(mayorPlayer, myCity) then
-		return false, "Apenas o prefeito pode responder."
+		return false, "Only the mayor can respond to trade deals."
 	end
 
 	local st = ensureCityElectionState(myCity)
@@ -1249,12 +1260,12 @@ function ElectionService.RespondTrade(mayorPlayer: Player, dealId: string, accep
 		end
 	end
 	if not found then
-		return false, "Proposta não encontrada ou expirada."
+		return false, "Proposal not found or expired."
 	end
 
 	local fromCity = found.fromCity
 	if not isValidCity(fromCity) then
-		return false, "Cidade de origem inválida."
+		return false, "Origin city is invalid."
 	end
 
 	removePendingTradeBothSides(dealId, fromCity, myCity)
@@ -1262,12 +1273,12 @@ function ElectionService.RespondTrade(mayorPlayer: Player, dealId: string, accep
 	if not accept then
 		local proposer = Players:GetPlayerByUserId(found.proposerUserId)
 		if proposer then
-			notifyPlayer(proposer, string.format("❌ %s recusou o acordo (%s).", myCity, found.dealType), "info")
+			notifyPlayer(proposer, string.format("❌ %s rejected the deal (%s).", myCity, found.dealType), "info")
 		end
 		printTag(string.format("ElectionService: Trade REJECTED id=%s", dealId))
 		saveCityElectionState(fromCity)
 		saveCityElectionState(myCity)
-		return true, "Proposta recusada."
+		return true, "Proposal rejected."
 	end
 
 	local now = os.time()
@@ -1287,13 +1298,13 @@ function ElectionService.RespondTrade(mayorPlayer: Player, dealId: string, accep
 	appendActiveDeal(fromCity, dealB)
 	appendActiveDeal(myCity, dealA)
 
-	notifyCityPlayers(fromCity, string.format("🤝 Acordo aceito com %s: %s (bônus por 24h).", myCity, found.dealType), "success")
-	notifyCityPlayers(myCity, string.format("🤝 Acordo aceito com %s: %s (bônus por 24h).", fromCity, found.dealType), "success")
+	notifyCityPlayers(fromCity, string.format("🤝 Deal accepted with %s: %s (24h bonus).", myCity, found.dealType), "success")
+	notifyCityPlayers(myCity, string.format("🤝 Deal accepted with %s: %s (24h bonus).", fromCity, found.dealType), "success")
 
 	printTag(string.format("ElectionService: Trade ACCEPTED id=%s (%s ↔ %s)", dealId, fromCity, myCity))
 	saveCityElectionState(fromCity)
 	saveCityElectionState(myCity)
-	return true, "Acordo aceito."
+	return true, "Deal accepted."
 end
 
 function ElectionService.GetActiveTrades(cityName: string): { ActiveTradeDeal }
@@ -1357,6 +1368,33 @@ local function start()
 	CityService.OnCityAssignmentChanged(function(player: Player, oldCity: string?, _newCity: string)
 		if oldCity and isValidCity(oldCity) then
 			local st = electionByCity[oldCity]
+			-- Purge this departing player's impeachment vote so the population-based
+			-- threshold stays consistent with who actually lives in the city now.
+			-- Without this, a player votes YES, leaves the city, and their vote keeps
+			-- counting against a shrunken population — distorting the percentage.
+			if st and st.impeachment then
+				local changed = false
+				if st.impeachment.yesVoters[player.UserId] then
+					st.impeachment.yesVoters[player.UserId] = nil
+					changed = true
+				end
+				if st.impeachment.noVoters[player.UserId] then
+					st.impeachment.noVoters[player.UserId] = nil
+					changed = true
+				end
+				if changed then
+					printTag(string.format("ElectionService: purged impeachment vote from %s leaving %s", player.Name, oldCity))
+				end
+			end
+			-- Also purge their election-vote marker so they could re-vote if they join
+			-- another city still in voting phase. We do NOT reverse the candidate tally:
+			-- preventing double-vote is the invariant; mutating counts mid-election opens
+			-- worse exploits (leave-and-rejoin griefing).
+			if st and st.voters[player.UserId] then
+				st.voters[player.UserId] = nil
+				printTag(string.format("ElectionService: purged election-vote marker from %s leaving %s", player.Name, oldCity))
+			end
+
 			local vacatedSeat = false
 			if st and st.currentMayor == player.UserId then
 				st.currentMayor = nil
